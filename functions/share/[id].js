@@ -128,10 +128,7 @@ export async function onRequest(context) {
 
   const title = parsedVideo.title || "NosTube video";
   const description = parsedVideo.summary || "Watch on NosTube";
-  const image = parsedVideo.thumb && /^https?:\/\//i.test(parsedVideo.thumb)
-    ? parsedVideo.thumb
-    : `${origin}/favicon.svg`;
-
+  const image = getOgImage(parsedVideo.thumb, origin);
   const media = getOgVideo(parsedVideo.url, parsedVideo.mime);
 
   const canonicalShareUrl = `${origin}/share/${encodeURIComponent(resolvedId)}`;
@@ -314,7 +311,7 @@ function escapeHtml(value) {
 function buildHtml({ title, description, image, url, redirectTo, publisher, ogVideoUrl, ogVideoType }) {
   const safeTitle = escapeHtml(title);
   const safeDesc = escapeHtml(description);
-  const safeImage = escapeHtml(image);
+  const safeImage = image ? escapeHtml(image) : "";
   const safeUrl = escapeHtml(url);
   const safeRedirect = escapeHtml(redirectTo);
   const safePublisher = escapeHtml(publisher || "");
@@ -334,7 +331,7 @@ function buildHtml({ title, description, image, url, redirectTo, publisher, ogVi
   <meta property="og:type" content="video.other" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safePublisher || safeDesc}" />
-  <meta property="og:image" content="${safeImage}" />
+  ${safeImage ? `<meta property="og:image" content="${safeImage}" />` : ""}
   <meta property="og:url" content="${safeUrl}" />
 
   ${safeOgVideoUrl ? `<meta property="og:video" content="${safeOgVideoUrl}" />` : ""}
@@ -346,7 +343,7 @@ function buildHtml({ title, description, image, url, redirectTo, publisher, ogVi
   ${safePublisher ? `<meta name="twitter:data1" content="${safePublisher}" />` : ""}
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safePublisher ? `${safePublisher} · ${safeDesc}` : safeDesc}" />
-  <meta name="twitter:image" content="${safeImage}" />
+  ${safeImage ? `<meta name="twitter:image" content="${safeImage}" />` : ""}
 </head>
 <body>
   <noscript>
@@ -387,6 +384,31 @@ function normalizeVideoUrl(raw) {
   const value = String(raw || "").trim();
   if (!value) return "";
   return value;
+}
+
+function ipfsToHttp(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (!/^ipfs:\/\//i.test(value)) return "";
+  const path = value.replace(/^ipfs:\/\//i, "").replace(/^\/+/, "");
+  if (!path) return "";
+  return `https://ipfs.io/ipfs/${path}`;
+}
+
+function normalizeHttpAssetUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  const ipfs = ipfsToHttp(value);
+  if (ipfs) return ipfs;
+  return "";
+}
+
+function getOgImage(rawThumb, origin) {
+  const candidate = normalizeHttpAssetUrl(rawThumb);
+  if (candidate && !/\.svg($|\?)/i.test(candidate)) return candidate;
+  // Avoid using SVG fallback for og:image since some clients (e.g. Discord) may drop embeds.
+  return "";
 }
 
 function getImetaUrl(tags) {
@@ -446,8 +468,8 @@ function parseVideoEvent(event) {
 }
 
 function getOgVideo(url, mimeHint) {
-  const raw = String(url || "").trim();
-  if (!/^https?:\/\//i.test(raw)) return { url: "", type: "" };
+  const raw = normalizeHttpAssetUrl(url);
+  if (!raw) return { url: "", type: "" };
 
   const hint = String(mimeHint || "").trim().toLowerCase();
   const lowerUrl = raw.toLowerCase();
