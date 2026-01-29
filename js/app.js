@@ -718,9 +718,9 @@ const RELAYS = [
   "wss://nostr.wine",
 ];
 
-const FEED_LIMIT = 18;
+const FEED_LIMIT = 248;
 const SHORTS_LIMIT = 12;
-const MAX_EVENT_AGE_DAYS = 60;
+const MAX_EVENT_AGE_DAYS = 365;
 const DEBUG_NOSTR = false;
 
 function showToast(message) {

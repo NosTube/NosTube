@@ -127,9 +127,14 @@ export async function onRequest(context) {
   } catch {}
 
   const title = parsedVideo.title || "NosTube video";
-  const description = parsedVideo.summary || "Watch on NosTube";
-  const image = getOgImage(parsedVideo.thumb, origin);
-  const media = getOgVideo(parsedVideo.url, parsedVideo.mime);
+  const description = publisher || "NosTube";
+
+  const hasThumb = Boolean(parsedVideo.thumb && /^https?:\/\//i.test(parsedVideo.thumb));
+  const hasVideo = isDirectMp4(parsedVideo.url, parsedVideo.mime);
+
+  const image = hasThumb ? parsedVideo.thumb : "";
+  const videoUrl = hasVideo ? parsedVideo.url : "";
+  const videoMime = hasVideo ? "video/mp4" : "";
 
   const canonicalShareUrl = `${origin}/share/${encodeURIComponent(resolvedId)}`;
   const canonicalAppUrl = `${origin}/#watch/${encodeURIComponent(resolvedId)}`;
@@ -141,8 +146,8 @@ export async function onRequest(context) {
     url: canonicalShareUrl,
     redirectTo: canonicalAppUrl,
     publisher,
-    ogVideoUrl: media.url,
-    ogVideoType: media.type,
+    videoUrl,
+    videoMime,
   }), {
     status: 200,
     headers: htmlHeaders({ cache: "public, max-age=300" }),
@@ -308,15 +313,15 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function buildHtml({ title, description, image, url, redirectTo, publisher, ogVideoUrl, ogVideoType }) {
+function buildHtml({ title, description, image, url, redirectTo, publisher, videoUrl, videoMime }) {
   const safeTitle = escapeHtml(title);
   const safeDesc = escapeHtml(description);
   const safeImage = image ? escapeHtml(image) : "";
   const safeUrl = escapeHtml(url);
   const safeRedirect = escapeHtml(redirectTo);
-  const safePublisher = escapeHtml(publisher || "");
-  const safeOgVideoUrl = ogVideoUrl ? escapeHtml(ogVideoUrl) : "";
-  const safeOgVideoType = ogVideoType ? escapeHtml(ogVideoType) : "";
+
+  const useLargeCard = Boolean(image);
+  const twitterCard = useLargeCard ? "summary_large_image" : "summary";
 
   return `<!doctype html>
 <html lang="en">
@@ -330,20 +335,19 @@ function buildHtml({ title, description, image, url, redirectTo, publisher, ogVi
   <meta property="og:site_name" content="NosTube" />
   <meta property="og:type" content="video.other" />
   <meta property="og:title" content="${safeTitle}" />
-  <meta property="og:description" content="${safePublisher || safeDesc}" />
-  ${safeImage ? `<meta property="og:image" content="${safeImage}" />` : ""}
+  <meta property="og:description" content="${safeDesc}" />
+  ${image ? `<meta property="og:image" content="${safeImage}" />` : ``}
   <meta property="og:url" content="${safeUrl}" />
 
-  ${safeOgVideoUrl ? `<meta property="og:video" content="${safeOgVideoUrl}" />` : ""}
-  ${safeOgVideoUrl ? `<meta property="og:video:secure_url" content="${safeOgVideoUrl}" />` : ""}
-  ${safeOgVideoType ? `<meta property="og:video:type" content="${safeOgVideoType}" />` : ""}
+  ${publisher ? `<meta property="video:director" content="${escapeHtml(publisher)}" />` : ``}
+  ${videoUrl ? `<meta property="og:video" content="${escapeHtml(videoUrl)}" />` : ``}
+  ${videoUrl ? `<meta property="og:video:secure_url" content="${escapeHtml(videoUrl)}" />` : ``}
+  ${videoMime ? `<meta property="og:video:type" content="${escapeHtml(videoMime)}" />` : ``}
 
-  <meta name="twitter:card" content="summary_large_image" />
-  ${safePublisher ? `<meta name="twitter:label1" content="Channel" />` : ""}
-  ${safePublisher ? `<meta name="twitter:data1" content="${safePublisher}" />` : ""}
+  <meta name="twitter:card" content="${twitterCard}" />
   <meta name="twitter:title" content="${safeTitle}" />
-  <meta name="twitter:description" content="${safePublisher ? `${safePublisher} · ${safeDesc}` : safeDesc}" />
-  ${safeImage ? `<meta name="twitter:image" content="${safeImage}" />` : ""}
+  <meta name="twitter:description" content="${safeDesc}" />
+  ${image ? `<meta name="twitter:image" content="${safeImage}" />` : ``}
 </head>
 <body>
   <noscript>
@@ -384,31 +388,6 @@ function normalizeVideoUrl(raw) {
   const value = String(raw || "").trim();
   if (!value) return "";
   return value;
-}
-
-function ipfsToHttp(raw) {
-  const value = String(raw || "").trim();
-  if (!value) return "";
-  if (!/^ipfs:\/\//i.test(value)) return "";
-  const path = value.replace(/^ipfs:\/\//i, "").replace(/^\/+/, "");
-  if (!path) return "";
-  return `https://ipfs.io/ipfs/${path}`;
-}
-
-function normalizeHttpAssetUrl(raw) {
-  const value = String(raw || "").trim();
-  if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return value;
-  const ipfs = ipfsToHttp(value);
-  if (ipfs) return ipfs;
-  return "";
-}
-
-function getOgImage(rawThumb, origin) {
-  const candidate = normalizeHttpAssetUrl(rawThumb);
-  if (candidate && !/\.svg($|\?)/i.test(candidate)) return candidate;
-  // Avoid using SVG fallback for og:image since some clients (e.g. Discord) may drop embeds.
-  return "";
 }
 
 function getImetaUrl(tags) {
@@ -454,7 +433,6 @@ function parseVideoEvent(event) {
     jsonUrl.mime ||
     getTagValue(tags, "m") ||
     getTagValue(tags, "mime") ||
-    getImetaMime(tags) ||
     "";
   return {
     id: event.id,
@@ -462,30 +440,18 @@ function parseVideoEvent(event) {
     title,
     summary,
     thumb,
-    mime,
     url,
+    mime,
   };
 }
 
-function getOgVideo(url, mimeHint) {
-  const raw = normalizeHttpAssetUrl(url);
-  if (!raw) return { url: "", type: "" };
-
-  const hint = String(mimeHint || "").trim().toLowerCase();
-  const lowerUrl = raw.toLowerCase();
-
-  const typeFromExt =
-    lowerUrl.endsWith(".mp4") ? "video/mp4" :
-    lowerUrl.endsWith(".webm") ? "video/webm" :
-    lowerUrl.endsWith(".ogg") || lowerUrl.endsWith(".ogv") ? "video/ogg" :
-    "";
-
-  const type = (hint && hint.startsWith("video/")) ? hint : typeFromExt;
-
-  if (!type) return { url: "", type: "" };
-  if (type === "application/vnd.apple.mpegurl") return { url: "", type: "" };
-
-  return { url: raw, type };
+function isDirectMp4(url, mime) {
+  const u = String(url || "");
+  const m = String(mime || "").toLowerCase();
+  if (!/^https?:\/\//i.test(u)) return false;
+  if (m === "video/mp4") return true;
+  if (m) return false;
+  return /\.mp4(\?|#|$)/i.test(u);
 }
 
 async function fetchFirstEventFromRelays({ relays, filter, timeoutMs }) {

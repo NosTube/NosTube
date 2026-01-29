@@ -62,8 +62,8 @@ export async function onRequest(context) {
   const picture = typeof profile?.picture === "string" ? profile.picture.trim() : "";
 
   const title = name || "NosTube channel";
-  const description = about || "View channel on NosTube";
-  const image = picture && /^https?:\/\//i.test(picture) ? picture : `${origin}/favicon.svg`;
+  const description = about || "Channel";
+  const image = picture && /^https?:\/\//i.test(picture) ? picture : "";
 
   return new Response(buildHtml({
     title,
@@ -96,9 +96,12 @@ function escapeHtml(value) {
 function buildHtml({ title, description, image, url, redirectTo }) {
   const safeTitle = escapeHtml(title);
   const safeDesc = escapeHtml(description);
-  const safeImage = escapeHtml(image);
+  const safeImage = image ? escapeHtml(image) : "";
   const safeUrl = escapeHtml(url);
   const safeRedirect = escapeHtml(redirectTo);
+
+  const useLargeCard = Boolean(image);
+  const twitterCard = useLargeCard ? "summary_large_image" : "summary";
 
   return `<!doctype html>
 <html lang="en">
@@ -113,13 +116,13 @@ function buildHtml({ title, description, image, url, redirectTo }) {
   <meta property="og:type" content="profile" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDesc}" />
-  <meta property="og:image" content="${safeImage}" />
+  ${image ? `<meta property="og:image" content="${safeImage}" />` : ``}
   <meta property="og:url" content="${safeUrl}" />
 
-  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:card" content="${twitterCard}" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDesc}" />
-  <meta name="twitter:image" content="${safeImage}" />
+  ${image ? `<meta name="twitter:image" content="${safeImage}" />` : ``}
 </head>
 <body>
   <noscript>
