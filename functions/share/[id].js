@@ -132,6 +132,8 @@ export async function onRequest(context) {
     ? parsedVideo.thumb
     : `${origin}/favicon.svg`;
 
+  const media = getOgVideo(parsedVideo.url, parsedVideo.mime);
+
   const canonicalShareUrl = `${origin}/share/${encodeURIComponent(resolvedId)}`;
   const canonicalAppUrl = `${origin}/#watch/${encodeURIComponent(resolvedId)}`;
 
@@ -142,6 +144,8 @@ export async function onRequest(context) {
     url: canonicalShareUrl,
     redirectTo: canonicalAppUrl,
     publisher,
+    ogVideoUrl: media.url,
+    ogVideoType: media.type,
   }), {
     status: 200,
     headers: htmlHeaders({ cache: "public, max-age=300" }),
@@ -307,13 +311,15 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function buildHtml({ title, description, image, url, redirectTo, publisher }) {
-  const fullTitle = publisher ? `${title} — ${publisher}` : title;
-  const safeTitle = escapeHtml(fullTitle);
+function buildHtml({ title, description, image, url, redirectTo, publisher, ogVideoUrl, ogVideoType }) {
+  const safeTitle = escapeHtml(title);
   const safeDesc = escapeHtml(description);
   const safeImage = escapeHtml(image);
   const safeUrl = escapeHtml(url);
   const safeRedirect = escapeHtml(redirectTo);
+  const safePublisher = escapeHtml(publisher || "");
+  const safeOgVideoUrl = ogVideoUrl ? escapeHtml(ogVideoUrl) : "";
+  const safeOgVideoType = ogVideoType ? escapeHtml(ogVideoType) : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -327,13 +333,19 @@ function buildHtml({ title, description, image, url, redirectTo, publisher }) {
   <meta property="og:site_name" content="NosTube" />
   <meta property="og:type" content="video.other" />
   <meta property="og:title" content="${safeTitle}" />
-  <meta property="og:description" content="${safeDesc}" />
+  <meta property="og:description" content="${safePublisher || safeDesc}" />
   <meta property="og:image" content="${safeImage}" />
   <meta property="og:url" content="${safeUrl}" />
 
+  ${safeOgVideoUrl ? `<meta property="og:video" content="${safeOgVideoUrl}" />` : ""}
+  ${safeOgVideoUrl ? `<meta property="og:video:secure_url" content="${safeOgVideoUrl}" />` : ""}
+  ${safeOgVideoType ? `<meta property="og:video:type" content="${safeOgVideoType}" />` : ""}
+
   <meta name="twitter:card" content="summary_large_image" />
+  ${safePublisher ? `<meta name="twitter:label1" content="Channel" />` : ""}
+  ${safePublisher ? `<meta name="twitter:data1" content="${safePublisher}" />` : ""}
   <meta name="twitter:title" content="${safeTitle}" />
-  <meta name="twitter:description" content="${safeDesc}" />
+  <meta name="twitter:description" content="${safePublisher ? `${safePublisher} · ${safeDesc}` : safeDesc}" />
   <meta name="twitter:image" content="${safeImage}" />
 </head>
 <body>
@@ -415,14 +427,43 @@ function parseVideoEvent(event) {
       extractUrlFromContent(content, IPFS_URL_RE) ||
       ""
   );
+  const mime =
+    tagUrl.mime ||
+    jsonUrl.mime ||
+    getTagValue(tags, "m") ||
+    getTagValue(tags, "mime") ||
+    getImetaMime(tags) ||
+    "";
   return {
     id: event.id,
     pubkey: event.pubkey,
     title,
     summary,
     thumb,
+    mime,
     url,
   };
+}
+
+function getOgVideo(url, mimeHint) {
+  const raw = String(url || "").trim();
+  if (!/^https?:\/\//i.test(raw)) return { url: "", type: "" };
+
+  const hint = String(mimeHint || "").trim().toLowerCase();
+  const lowerUrl = raw.toLowerCase();
+
+  const typeFromExt =
+    lowerUrl.endsWith(".mp4") ? "video/mp4" :
+    lowerUrl.endsWith(".webm") ? "video/webm" :
+    lowerUrl.endsWith(".ogg") || lowerUrl.endsWith(".ogv") ? "video/ogg" :
+    "";
+
+  const type = (hint && hint.startsWith("video/")) ? hint : typeFromExt;
+
+  if (!type) return { url: "", type: "" };
+  if (type === "application/vnd.apple.mpegurl") return { url: "", type: "" };
+
+  return { url: raw, type };
 }
 
 async function fetchFirstEventFromRelays({ relays, filter, timeoutMs }) {
