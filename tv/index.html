@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NosTube on TV</title>
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..700,0..1,-50..200" />
+  <link rel="stylesheet" href="tv.css" />
+</head>
+<body class="tv">
+  <div class="tv-shell">
+    <div class="tv-backdrop"></div>
+    <div class="tv-scrim"></div>
+
+    <header class="tv-topbar">
+      <div class="tv-top-left">
+        <div class="tv-section-label">Home</div>
+      </div>
+      <div class="tv-brand">
+        <span class="brand-icon material-symbols-rounded">play_arrow</span>
+        <span>NosTube</span>
+      </div>
+    </header>
+
+    <div class="tv-layout">
+      <nav class="tv-rail" id="tv-rail">
+        <button class="rail-item" data-rail="0" data-page="profile" aria-label="Profile">
+          <div class="rail-avatar">
+            <span class="material-symbols-rounded">account_circle</span>
+          </div>
+          <span class="rail-label">Profile</span>
+        </button>
+        <button class="rail-item is-focused" data-rail="1" data-page="search" aria-label="Search">
+          <span class="material-symbols-rounded">search</span>
+          <span class="rail-label">Search</span>
+        </button>
+        <button class="rail-item" data-rail="2" data-page="home" aria-label="Home">
+          <span class="material-symbols-rounded">home</span>
+          <span class="rail-label">Home</span>
+        </button>
+        <button class="rail-item" data-rail="3" data-page="shorts" aria-label="Shorts">
+          <span class="material-symbols-rounded">play_circle</span>
+          <span class="rail-label">Shorts</span>
+        </button>
+        <button class="rail-item" data-rail="4" data-page="subs" aria-label="Subscriptions">
+          <span class="material-symbols-rounded">subscriptions</span>
+          <span class="rail-label">Subscriptions</span>
+        </button>
+        <button class="rail-item" data-rail="5" data-page="library" aria-label="Library">
+          <span class="material-symbols-rounded">video_library</span>
+          <span class="rail-label">Library</span>
+        </button>
+        <button class="rail-item" data-rail="6" data-page="settings" aria-label="Settings">
+          <span class="material-symbols-rounded">settings</span>
+          <span class="rail-label">Settings</span>
+        </button>
+      </nav>
+
+      <main class="tv-content" id="tv-content">
+        <section class="tv-page is-active" data-page="home" id="tv-page-home">
+          <section class="tv-row" data-row="0">
+            <div class="row-title">Recommended</div>
+            <div class="row-track" id="tv-row-recommended"></div>
+            <div class="row-empty" id="tv-recommended-empty">Loading recommended videos…</div>
+          </section>
+
+          <section class="tv-row" data-row="1">
+            <div class="row-title">New</div>
+            <div class="row-track" id="tv-row-new"></div>
+            <div class="row-empty" id="tv-new-empty">Fetching the latest uploads…</div>
+          </section>
+        </section>
+
+        <section class="tv-page" data-page="search" id="tv-page-search">
+          <div class="search-panel">
+            <div class="search-input-row">
+              <span class="material-symbols-rounded">search</span>
+              <input id="search-input" type="text" placeholder="Search NosTube" autocomplete="off" />
+            </div>
+            <div class="search-suggestions">
+              <span>nostr news</span>
+              <span>relay analytics</span>
+              <span>nos tube on tv</span>
+              <span>privacy playlists</span>
+            </div>
+          </div>
+          <div class="tv-keyboard" id="tv-keyboard">
+            <button class="key focusable" data-key="A" data-focus-row="0" data-focus-col="0">A</button>
+            <button class="key focusable" data-key="B" data-focus-row="0" data-focus-col="1">B</button>
+            <button class="key focusable" data-key="C" data-focus-row="0" data-focus-col="2">C</button>
+            <button class="key focusable" data-key="D" data-focus-row="0" data-focus-col="3">D</button>
+            <button class="key focusable" data-key="E" data-focus-row="0" data-focus-col="4">E</button>
+            <button class="key focusable" data-key="F" data-focus-row="0" data-focus-col="5">F</button>
+            <button class="key focusable" data-key="G" data-focus-row="0" data-focus-col="6">G</button>
+            <button class="key focusable" data-key="H" data-focus-row="0" data-focus-col="7">H</button>
+            <button class="key focusable" data-key="I" data-focus-row="0" data-focus-col="8">I</button>
+            <button class="key focusable" data-key="J" data-focus-row="0" data-focus-col="9">J</button>
+            <button class="key focusable" data-key="K" data-focus-row="1" data-focus-col="0">K</button>
+            <button class="key focusable" data-key="L" data-focus-row="1" data-focus-col="1">L</button>
+            <button class="key focusable" data-key="M" data-focus-row="1" data-focus-col="2">M</button>
+            <button class="key focusable" data-key="N" data-focus-row="1" data-focus-col="3">N</button>
+            <button class="key focusable" data-key="O" data-focus-row="1" data-focus-col="4">O</button>
+            <button class="key focusable" data-key="P" data-focus-row="1" data-focus-col="5">P</button>
+            <button class="key focusable" data-key="Q" data-focus-row="1" data-focus-col="6">Q</button>
+            <button class="key focusable" data-key="R" data-focus-row="1" data-focus-col="7">R</button>
+            <button class="key focusable" data-key="S" data-focus-row="1" data-focus-col="8">S</button>
+            <button class="key focusable" data-key="T" data-focus-row="1" data-focus-col="9">T</button>
+            <button class="key focusable" data-key="U" data-focus-row="2" data-focus-col="0">U</button>
+            <button class="key focusable" data-key="V" data-focus-row="2" data-focus-col="1">V</button>
+            <button class="key focusable" data-key="W" data-focus-row="2" data-focus-col="2">W</button>
+            <button class="key focusable" data-key="X" data-focus-row="2" data-focus-col="3">X</button>
+            <button class="key focusable" data-key="Y" data-focus-row="2" data-focus-col="4">Y</button>
+            <button class="key focusable" data-key="Z" data-focus-row="2" data-focus-col="5">Z</button>
+            <button class="key focusable" data-key="SPACE" data-focus-row="2" data-focus-col="6"><span class="material-symbols-rounded">space_bar</span></button>
+            <button class="key focusable" data-key="DEL" data-focus-row="2" data-focus-col="7"><span class="material-symbols-rounded">backspace</span></button>
+            <button class="key focusable" data-key="CLEAR" data-focus-row="2" data-focus-col="8"><span class="material-symbols-rounded">clear</span></button>
+            <button class="key focusable" data-key="DONE" data-focus-row="2" data-focus-col="9"><span class="material-symbols-rounded">done</span></button>
+          </div>
+        </section>
+
+        <section class="tv-page" data-page="shorts" id="tv-page-shorts">
+          <div class="page-placeholder">Shorts page (coming soon)</div>
+        </section>
+
+        <section class="tv-page" data-page="subs" id="tv-page-subs">
+          <div class="page-placeholder">Subscriptions page (coming soon)</div>
+        </section>
+
+        <section class="tv-page" data-page="library" id="tv-page-library">
+          <div class="page-placeholder">Library page (coming soon)</div>
+        </section>
+
+        <section class="tv-page" data-page="settings" id="tv-page-settings">
+          <div class="page-placeholder">Settings page (coming soon)</div>
+        </section>
+
+        <section class="tv-page" data-page="profile" id="tv-page-profile">
+          <div class="page-placeholder">Profile page (coming soon)</div>
+        </section>
+
+        <section class="tv-page" data-page="channel" id="tv-page-channel">
+          <div class="channel-hero">
+            <div class="channel-avatar" id="channel-avatar">
+              <img class="channel-avatar-img" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+              <span class="channel-avatar-text">N</span>
+            </div>
+            <div>
+              <div class="channel-title" id="channel-title">Channel</div>
+              <div class="channel-meta" id="channel-meta">nostr channel</div>
+            </div>
+          </div>
+          <section class="tv-row" data-row="0">
+            <div class="row-title">Videos</div>
+            <div class="row-track" id="tv-row-channel"></div>
+            <div class="row-empty" id="tv-channel-empty">No videos yet.</div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <section class="player-screen" id="player-screen" aria-hidden="true">
+      <div class="player-viewport">
+        <video id="tv-video" playsinline></video>
+        <div class="player-hud">
+          <div class="player-channel-row">
+            <button class="player-channel-btn focusable" data-focus-row="0" data-focus-col="0" data-player-action="channel">
+              <span class="player-channel-avatar">N</span>
+              <span class="player-channel-name">NosTube</span>
+            </button>
+          </div>
+          <div class="player-title">Inside the nostr creator economy</div>
+          <div class="player-meta">1,243,018 views · nostr vision</div>
+          <div class="player-timeline">
+            <div class="player-progress">
+              <div class="player-progress-inner" id="player-progress-inner"></div>
+            </div>
+            <div class="player-times">
+              <span id="player-time-current">0:00</span>
+              <span id="player-time-total">0:00</span>
+            </div>
+          </div>
+          <div class="player-controls">
+            <button class="hud-btn focusable" data-focus-row="1" data-focus-col="0" data-player-action="toggle">
+              <span class="material-symbols-rounded">play_arrow</span>
+              <span class="hud-label">Play</span>
+            </button>
+            <button class="hud-btn focusable" data-focus-row="1" data-focus-col="1" data-player-action="forward">
+              <span class="material-symbols-rounded">forward_10</span>
+              +10s
+            </button>
+            <button class="hud-btn focusable" data-focus-row="1" data-focus-col="2" data-player-action="restart">
+              <span class="material-symbols-rounded">restart_alt</span>
+              Restart
+            </button>
+            <button class="hud-btn focusable" data-focus-row="1" data-focus-col="3" data-player-action="back">
+              <span class="material-symbols-rounded">close</span>
+              Back
+            </button>
+          </div>
+        </div>
+        <div class="player-upnext">
+          <div class="player-upnext-track" id="player-upnext-track">
+            <div class="player-upnext-section">
+              <div class="player-upnext-title">Up next</div>
+              <div class="player-upnext-row" id="player-upnext-row"></div>
+            </div>
+            <div class="player-upnext-section" id="player-more-section" hidden>
+              <div class="player-upnext-title" id="player-more-title">More</div>
+              <div class="player-upnext-row" id="player-more-row"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <template id="tv-card-template">
+    <button class="tile focusable" data-focus-row="0" data-focus-col="0">
+      <div class="tile-thumb">
+        <img class="tile-img" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+      </div>
+      <div class="tile-title">Video title</div>
+      <div class="tile-meta">
+        <span class="tile-channel">nostr vision</span>
+      </div>
+    </button>
+  </template>
+
+  <template id="tv-upnext-template">
+    <button class="tile tile-compact focusable" data-focus-row="1" data-focus-col="0">
+      <div class="tile-thumb">
+        <img class="tile-img" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+      </div>
+      <div class="tile-title">Video title</div>
+      <div class="tile-meta">
+        <span class="tile-channel">nostr vision</span>
+      </div>
+    </button>
+  </template>
+
+  <script src="../lib/hls.js"></script>
+  <script src="tv.js"></script>
+</body>
+</html>
