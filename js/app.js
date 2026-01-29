@@ -723,6 +723,8 @@ const SHORTS_LIMIT = 12;
 const MAX_EVENT_AGE_DAYS = 365;
 const DEBUG_NOSTR = false;
 
+let watchLoadToken = 0;
+
 function showToast(message) {
   if (!toastEl) return;
   toastEl.textContent = String(message || "");
@@ -1818,6 +1820,179 @@ function getRoute() {
   };
 }
 
+function normalizeRelayUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!/^wss?:\/\//i.test(raw)) return "";
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "wss:" && u.protocol !== "ws:") return "";
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
+
+function parseRelayHints(searchParams) {
+  const out = [];
+  if (!searchParams) return out;
+  const singles = searchParams.getAll("relay");
+  for (const v of singles) {
+    const norm = normalizeRelayUrl(v);
+    if (norm) out.push(norm);
+  }
+  const packed = searchParams.get("relays") || "";
+  if (packed) {
+    packed
+      .split(/[\s,]+/)
+      .map((s) => normalizeRelayUrl(s))
+      .filter(Boolean)
+      .forEach((r) => out.push(r));
+  }
+  return out;
+}
+
+function mergeRelays(...relayLists) {
+  const out = [];
+  const seen = new Set();
+  for (const list of relayLists) {
+    for (const r of list || []) {
+      const norm = normalizeRelayUrl(r);
+      if (!norm || seen.has(norm)) continue;
+      seen.add(norm);
+      out.push(norm);
+    }
+  }
+  return out;
+}
+
+function normalizeWatchTarget(rawId) {
+  const value = String(rawId || "").trim();
+  if (!value) return { id: "", relays: [] };
+  const tools = getNostrTools();
+  if (tools?.nip19?.decode && /^(note|nevent)1[0-9a-z]+$/i.test(value)) {
+    try {
+      const decoded = tools.nip19.decode(value);
+      if (decoded?.type === "note") {
+        return { id: bytesToHex(decoded.data), relays: [] };
+      }
+      if (decoded?.type === "nevent") {
+        return {
+          id: String(decoded.data?.id || ""),
+          relays: Array.isArray(decoded.data?.relays) ? decoded.data.relays : [],
+        };
+      }
+    } catch {}
+  }
+  return { id: value, relays: [] };
+}
+
+async function fetchFirstEventFromRelays(relays, filter) {
+  let found = null;
+  await Promise.all(
+    relays.map((relay) =>
+      requestEvents(relay, filter, (event) => {
+        if (!found) found = event;
+      })
+    )
+  );
+  return found;
+}
+
+async function fetchProfileFromRelays(relays, pubkey) {
+  if (!pubkey) return null;
+  let profile = null;
+  const filter = { kinds: [0], authors: [pubkey], limit: 1 };
+  await Promise.all(
+    relays.map((relay) =>
+      requestEvents(relay, filter, (event) => {
+        if (profile) return;
+        try {
+          const data = JSON.parse(event.content || "{}");
+          profile = {
+            name: data.display_name || data.name || shortenKey(event.pubkey),
+            picture: data.picture || "",
+            nip05: data.nip05 || "",
+          };
+        } catch {
+          profile = {
+            name: shortenKey(event.pubkey),
+            picture: "",
+            nip05: "",
+          };
+        }
+      })
+    )
+  );
+  return profile;
+}
+
+async function ensureWatchVideoLoaded(route) {
+  const token = ++watchLoadToken;
+  const target = normalizeWatchTarget(route?.id);
+  const queryRelays = parseRelayHints(route?.params);
+  const relays = mergeRelays(RELAYS, target.relays, queryRelays);
+
+  if (!target.id) {
+    showToast("Invalid video id.");
+    if (token === watchLoadToken) window.location.hash = "#home";
+    return;
+  }
+
+  const isHex = /^[0-9a-f]+$/i.test(target.id);
+  if (!isHex || target.id.length < 8 || target.id.length > 64) {
+    showToast("Invalid video id.");
+    if (token === watchLoadToken) window.location.hash = "#home";
+    return;
+  }
+
+  if (watchStatus) {
+    watchStatus.textContent = "Loading video…";
+    watchStatus.hidden = false;
+  }
+  setActivePage(pageWatch);
+  setActiveNav("");
+  updateSubscribeButton();
+  setWatchLikeUi();
+  setWatchSaveUi();
+
+  let event = null;
+  if (/^[0-9a-f]{64}$/i.test(target.id)) {
+    event = await fetchFirstEventFromRelays(relays, { ids: [target.id], limit: 1 });
+  } else {
+    const matches = new Map();
+    await Promise.all(
+      relays.map((relay) =>
+        requestEvents(relay, { ids: [target.id], limit: 20 }, (ev) => {
+          if (!matches.has(ev.id)) matches.set(ev.id, ev);
+        })
+      )
+    );
+    if (matches.size === 1) {
+      event = Array.from(matches.values())[0];
+    } else if (matches.size > 1) {
+      showToast("That short id matched multiple videos. Use a longer id.");
+      if (token === watchLoadToken) window.location.hash = "#home";
+      return;
+    }
+  }
+
+  if (token !== watchLoadToken) return;
+  if (!event) {
+    showToast("Video not found on relays.");
+    window.location.hash = "#home";
+    return;
+  }
+
+  const video = parseVideoEvent(event);
+  const profile =
+    profilesCache.get(event.pubkey) ||
+    (await fetchProfileFromRelays(relays, event.pubkey));
+  if (profile) profilesCache.set(event.pubkey, profile);
+  storeVideo(video, profile);
+  showWatchForVideo(videoStore.get(video.id));
+}
+
 function storeVideo(video, profile) {
   if (!video?.id) return;
   videoStore.set(video.id, {
@@ -2562,7 +2737,7 @@ function handleRoute() {
     if (video) {
       showWatchForVideo(video);
     } else {
-      setActivePage(pageHome);
+      ensureWatchVideoLoaded(route);
     }
     setActiveNav("");
     updateSubscribeButton();
