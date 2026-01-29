@@ -290,10 +290,22 @@
                       <span class="material-symbols-rounded">thumb_down</span>
                       Dislike
                     </button>
-                    <button class="watch-action">
-                      <span class="material-symbols-rounded">share</span>
-                      Share
-                    </button>
+                    <div class="menu-anchor" id="watch-share-anchor">
+                      <button class="watch-action" id="watch-share" type="button">
+                        <span class="material-symbols-rounded">share</span>
+                        Share
+                      </button>
+                      <div class="menu" id="watch-share-menu" hidden>
+                        <button class="menu-item" id="watch-share-link" type="button">
+                          <span class="material-symbols-rounded">link</span>
+                          Share Link
+                        </button>
+                        <button class="menu-item" id="watch-share-embed" type="button">
+                          <span class="material-symbols-rounded">code</span>
+                          Embed Code (coming soon)
+                        </button>
+                      </div>
+                    </div>
                     <button class="watch-action" id="watch-save">
                       <span class="material-symbols-rounded">playlist_add</span>
                       Save

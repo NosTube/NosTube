@@ -117,6 +117,11 @@ const sidebarSubsEmpty = document.getElementById("sidebar-subs-empty");
 const toastEl = document.getElementById("toast");
 const channelSubscribeBtn = document.getElementById("channel-subscribe");
 const channelEditBtn = document.getElementById("channel-edit");
+const watchShareAnchor = document.getElementById("watch-share-anchor");
+const watchShareBtn = document.getElementById("watch-share");
+const watchShareMenu = document.getElementById("watch-share-menu");
+const watchShareLink = document.getElementById("watch-share-link");
+const watchShareEmbed = document.getElementById("watch-share-embed");
 
 const subsFeed = document.getElementById("feed-subs");
 const subsEmpty = document.getElementById("feed-subs-empty");
@@ -1078,6 +1083,22 @@ function closeAllMenus() {
   closeMenu(createMenu);
   closeMenu(userMenu);
   closeMenu(channelMenu);
+  closeMenu(watchShareMenu);
+}
+
+function positionMenu(menu) {
+  if (!menu || menu.hidden) return;
+  menu.classList.remove("is-up");
+  const rect = menu.getBoundingClientRect();
+  const padding = 12;
+  if (rect.bottom > window.innerHeight - padding) {
+    menu.classList.add("is-up");
+  }
+}
+
+function openMenuWithPosition(menu) {
+  openMenu(menu);
+  requestAnimationFrame(() => positionMenu(menu));
 }
 
 if (channelBackBtn) {
@@ -1097,7 +1118,7 @@ if (channelMoreBtn && channelMenu) {
   channelMoreBtn.addEventListener("click", () => {
     if (channelMenu.hidden) {
       closeAllMenus();
-      openMenu(channelMenu);
+      openMenuWithPosition(channelMenu);
     } else {
       closeMenu(channelMenu);
     }
@@ -1125,7 +1146,9 @@ async function copyText(text) {
 if (channelMenuShare) {
   channelMenuShare.addEventListener("click", async () => {
     closeAllMenus();
-    const url = window.location.href;
+    const origin = window.location.origin;
+    const pubkey = currentChannelPubkey || "";
+    const url = pubkey ? `${origin}/share/channel/${pubkey}` : window.location.href;
     try {
       await copyText(url);
       showToast("Link copied");
@@ -3239,7 +3262,7 @@ if (userAvatar) {
       return;
     }
     if (isMenuOpen(userMenu)) closeMenu(userMenu);
-    else openMenu(userMenu);
+    else openMenuWithPosition(userMenu);
   });
 }
 
@@ -3252,9 +3275,50 @@ if (createBtn) {
       return;
     }
     if (isMenuOpen(createMenu)) closeMenu(createMenu);
-    else openMenu(createMenu);
+    else openMenuWithPosition(createMenu);
   });
 }
+
+if (watchShareBtn && watchShareMenu) {
+  watchShareBtn.addEventListener("click", () => {
+    if (watchShareMenu.hidden) {
+      closeAllMenus();
+      openMenuWithPosition(watchShareMenu);
+    } else {
+      closeMenu(watchShareMenu);
+    }
+  });
+}
+
+if (watchShareLink) {
+  watchShareLink.addEventListener("click", async () => {
+    closeAllMenus();
+    const video = getCurrentWatchVideo();
+    if (!video?.id) return;
+    const origin = window.location.origin;
+    const shareUrl = `${origin}/share/${video.id}`;
+    try {
+      await copyText(shareUrl);
+      showToast("Link copied");
+    } catch {
+      showToast("Copy failed");
+    }
+  });
+}
+
+if (watchShareEmbed) {
+  watchShareEmbed.addEventListener("click", () => {
+    closeAllMenus();
+    showToast("Embed code (coming soon)");
+  });
+}
+
+window.addEventListener("resize", () => {
+  positionMenu(createMenu);
+  positionMenu(userMenu);
+  positionMenu(channelMenu);
+  positionMenu(watchShareMenu);
+});
 
 if (menuUpload) {
   menuUpload.addEventListener("click", () => {
