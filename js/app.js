@@ -718,7 +718,7 @@ const RELAYS = [
   "wss://nostr.wine",
 ];
 
-const FEED_LIMIT = 248;
+const FEED_LIMIT = 64;
 const SHORTS_LIMIT = 12;
 const MAX_EVENT_AGE_DAYS = 365;
 const DEBUG_NOSTR = false;

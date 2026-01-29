@@ -4,6 +4,7 @@ export async function onRequest(context) {
 
   let rawId = incoming;
   const nip19 = tryDecodeNip19(incoming);
+  const nip19Relays = Array.isArray(nip19?.data?.relays) ? nip19.data.relays : [];
   if (nip19?.type === "note") {
     rawId = nip19.data;
   } else if (nip19?.type === "nevent") {
@@ -43,12 +44,15 @@ export async function onRequest(context) {
     });
   }
 
-  const RELAYS = [
+  const DEFAULT_RELAYS = [
     "wss://relay.damus.io",
     "wss://nos.lol",
     "wss://relay.snort.social",
     "wss://nostr.wine",
   ];
+
+  const queryRelays = parseRelayHints(url.searchParams);
+  const RELAYS = mergeRelays(DEFAULT_RELAYS, nip19Relays, queryRelays);
 
   let videoEvent = null;
   let resolvedId = rawId;
@@ -274,24 +278,82 @@ function nip19Decode(nip19) {
   if (prefix === "nevent") {
     const tlv = parseTLV(bytes);
     if (!tlv[0]?.[0] || tlv[0][0].length !== 32) throw new Error("missing TLV0 for nevent");
+    const relays = (tlv[1] || []).map((d) => utf8Decode(d)).filter(Boolean);
     return {
       type: "nevent",
       data: {
         id: bytesToHex(tlv[0][0]),
+        relays,
       },
     };
   }
   if (prefix === "nprofile") {
     const tlv = parseTLV(bytes);
     if (!tlv[0]?.[0] || tlv[0][0].length !== 32) throw new Error("missing TLV0 for nprofile");
+    const relays = (tlv[1] || []).map((d) => utf8Decode(d)).filter(Boolean);
     return {
       type: "nprofile",
       data: {
         pubkey: bytesToHex(tlv[0][0]),
+        relays,
       },
     };
   }
   throw new Error(`unsupported nip19 prefix ${prefix}`);
+}
+
+function utf8Decode(bytes) {
+  try {
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function normalizeRelayUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!/^wss?:\/\//i.test(raw)) return "";
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "wss:" && u.protocol !== "ws:") return "";
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
+
+function parseRelayHints(searchParams) {
+  const out = [];
+  if (!searchParams) return out;
+  const singles = searchParams.getAll("relay");
+  for (const v of singles) {
+    const norm = normalizeRelayUrl(v);
+    if (norm) out.push(norm);
+  }
+  const packed = searchParams.get("relays") || "";
+  if (packed) {
+    packed
+      .split(/[\s,]+/)
+      .map((s) => normalizeRelayUrl(s))
+      .filter(Boolean)
+      .forEach((r) => out.push(r));
+  }
+  return out;
+}
+
+function mergeRelays(...relayLists) {
+  const out = [];
+  const seen = new Set();
+  for (const list of relayLists) {
+    for (const r of list || []) {
+      const norm = normalizeRelayUrl(r);
+      if (!norm || seen.has(norm)) continue;
+      seen.add(norm);
+      out.push(norm);
+    }
+  }
+  return out;
 }
 
 function tryDecodeNip19(input) {
