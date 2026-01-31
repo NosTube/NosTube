@@ -882,6 +882,7 @@ body.is-search-topbar #search-more-anchor {
 
   body.is-search-topbar .topbar-center .search input {
     background: transparent;
+    outline: none;
   }
 
   body.is-search-topbar .topbar-center .search-btn {
@@ -2101,7 +2102,7 @@ body.sidebar-collapsed .sidebar-link {
   }
 
   .feed-section {
-    padding: 0 12px 12px;
+    padding: 0 12px calc(12px + 64px);
   }
   .chips::-webkit-scrollbar {
     display: none;

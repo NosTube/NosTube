@@ -230,6 +230,35 @@ function navToMain(key) {
       return;
     }
 
+    const currentHash = window.location.hash || "#home";
+    const currentIsMain =
+      currentHash === "#home" ||
+      currentHash === "#shorts" ||
+      currentHash === "#subs" ||
+      currentHash === "#library";
+    if (currentIsMain && currentHash !== "#home" && mainNavHasHomeBase) {
+      homeResetInProgress = true;
+      pendingMainAfterHomeReset = "";
+      try {
+        if (homeResetGuardTimer) {
+          window.clearTimeout(homeResetGuardTimer);
+        }
+      } catch {}
+      homeResetGuardTimer = window.setTimeout(() => {
+        homeResetInProgress = false;
+        pendingMainAfterHomeReset = "";
+        homeResetGuardTimer = 0;
+        try {
+          navReplace("#home");
+        } catch {}
+      }, 1600);
+      try {
+        history.back();
+        return;
+      } catch {}
+      homeResetInProgress = false;
+    }
+
     const isDeepPage =
       route.page &&
       route.page !== "home" &&
