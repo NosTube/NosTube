@@ -2,6 +2,11 @@ const menuToggle = document.getElementById("menu-toggle");
 const mobileSearch = document.getElementById("mobile-search");
 const searchOverlay = document.getElementById("search-overlay");
 const searchClose = document.getElementById("search-close");
+const brandLink = document.querySelector("a.brand");
+const appShell = document.querySelector(".app-shell");
+const appBody = document.querySelector(".app-body");
+const topbar = document.querySelector(".topbar");
+const mobileNav = document.querySelector(".mobile-nav");
 const recommendedFeed = document.getElementById("feed-recommended");
 const latestFeed = document.getElementById("feed-latest");
 const shortsGrid = document.getElementById("shorts-grid");
@@ -17,6 +22,7 @@ const pageLibrary = document.getElementById("page-library");
 const pageHistory = document.getElementById("page-history");
 const pageWatchlater = document.getElementById("page-watchlater");
 const pageLiked = document.getElementById("page-liked");
+const pageSearch = document.getElementById("page-search");
 const pageWatch = document.getElementById("page-watch");
 const pageChannel = document.getElementById("page-channel");
 const sidebarNavLinks = Array.from(document.querySelectorAll(".sidebar a.sidebar-link[data-nav]"));
@@ -62,6 +68,11 @@ const channelMenuShare = document.getElementById("channel-menu-share");
 const channelMenuAbout = document.getElementById("channel-menu-about");
 const channelMenuReport = document.getElementById("channel-menu-report");
 const channelMenuHelp = document.getElementById("channel-menu-help");
+const searchMoreAnchor = document.getElementById("search-more-anchor");
+const searchMoreBtn = document.getElementById("search-more");
+const searchMenu = document.getElementById("search-menu");
+const searchMenuFilters = document.getElementById("search-menu-filters");
+const searchMenuHelp = document.getElementById("search-menu-help");
 const channelAvatar = document.getElementById("channel-avatar");
 const channelInitials = document.getElementById("channel-initials");
 const channelImage = document.getElementById("channel-image");
@@ -123,6 +134,12 @@ const watchShareMenu = document.getElementById("watch-share-menu");
 const watchShareLink = document.getElementById("watch-share-link");
 const watchShareEmbed = document.getElementById("watch-share-embed");
 
+const searchBackBtn = document.getElementById("search-back");
+const searchTitle = document.getElementById("search-title");
+const searchMeta = document.getElementById("search-meta");
+const searchFeed = document.getElementById("feed-search");
+const searchEmpty = document.getElementById("feed-search-empty");
+
 const subsFeed = document.getElementById("feed-subs");
 const subsEmpty = document.getElementById("feed-subs-empty");
 const historyList = document.getElementById("feed-history");
@@ -137,6 +154,7 @@ let isScrubbingProgress = false;
 let lastVolume = 1;
 let lastWatchedVideoId = "";
 let lastNonWatchHash = "#home";
+let lastNonSearchHash = "#home";
 let miniLastHash = "#home";
 let channelEntryHash = "#home";
 let isMini = false;
@@ -160,6 +178,162 @@ let watchTransitionTimer = 0;
 let watchTransitionListener = null;
 let dockHoldTimer = 0;
 let dockHoldListener = null;
+let suppressMiniOnLeaveWatchOnce = false;
+let mainNavHasHomeBase = false;
+let homeResetInProgress = false;
+let homeResetGuardTimer = 0;
+let pendingMainAfterHomeReset = "";
+
+function navReplace(nextHash) {
+  const target = String(nextHash || "") || "#home";
+  try {
+    history.replaceState(history.state || {}, "", target);
+  } catch {
+    window.location.hash = target;
+    return;
+  }
+  try {
+    handleRoute();
+  } catch {}
+}
+
+function navPush(nextHash) {
+  const target = String(nextHash || "") || "#home";
+  try {
+    history.pushState(history.state || {}, "", target);
+  } catch {
+    window.location.hash = target;
+    return;
+  }
+  try {
+    handleRoute();
+  } catch {}
+}
+
+function navToMain(key) {
+  const k = String(key || "");
+  const map = {
+    home: "#home",
+    shorts: "#shorts",
+    subs: "#subs",
+    library: "#library",
+  };
+  const target = map[k] || "#home";
+  const currentHash = window.location.hash || "#home";
+  if (target === currentHash) return;
+
+  if (target === "#home") {
+    const route = getRoute();
+    if (route.page === "watch" && !isMini) {
+      navigateFromWatchTo(target);
+      mainNavHasHomeBase = true;
+      return;
+    }
+
+    const isDeepPage =
+      route.page &&
+      route.page !== "home" &&
+      route.page !== "shorts" &&
+      route.page !== "subs" &&
+      route.page !== "library";
+    if (isDeepPage && mainNavHasHomeBase) {
+      homeResetInProgress = true;
+      try {
+        if (homeResetGuardTimer) {
+          window.clearTimeout(homeResetGuardTimer);
+        }
+      } catch {}
+      homeResetGuardTimer = window.setTimeout(() => {
+        homeResetInProgress = false;
+        homeResetGuardTimer = 0;
+        try {
+          navReplace("#home");
+        } catch {}
+      }, 1600);
+      try {
+        history.back();
+        return;
+      } catch {}
+    }
+
+    navReplace(target);
+    mainNavHasHomeBase = true;
+    return;
+  }
+
+  const isMainHash = (hash) =>
+    hash === "#home" || hash === "#shorts" || hash === "#subs" || hash === "#library";
+  const currentIsMain = isMainHash(currentHash);
+  if (currentHash === "#home") {
+    mainNavHasHomeBase = true;
+  }
+
+  const route = getRoute();
+
+  if (route.page && !currentIsMain && mainNavHasHomeBase) {
+    pendingMainAfterHomeReset = target;
+    homeResetInProgress = true;
+    try {
+      if (homeResetGuardTimer) {
+        window.clearTimeout(homeResetGuardTimer);
+      }
+    } catch {}
+    homeResetGuardTimer = window.setTimeout(() => {
+      homeResetInProgress = false;
+      pendingMainAfterHomeReset = "";
+      homeResetGuardTimer = 0;
+      try {
+        navReplace("#home");
+      } catch {}
+    }, 1600);
+    try {
+      history.back();
+      return;
+    } catch {}
+    homeResetInProgress = false;
+    pendingMainAfterHomeReset = "";
+  }
+
+  if (currentHash === "#home") {
+    navPush(target);
+    mainNavHasHomeBase = true;
+    return;
+  }
+
+  if (currentIsMain && mainNavHasHomeBase) {
+    navReplace(target);
+    return;
+  }
+
+  if (route.page === "watch" && !isMini) {
+    try {
+      history.replaceState(history.state || {}, "", "#home");
+      history.pushState(history.state || {}, "", target);
+    } catch {
+      window.location.hash = "#home";
+      window.location.hash = target;
+      return;
+    }
+    mainNavHasHomeBase = true;
+    try {
+      handleRoute();
+    } catch {}
+    return;
+  }
+
+  try {
+    history.replaceState(history.state || {}, "", "#home");
+    history.pushState(history.state || {}, "", target);
+  } catch {
+    window.location.hash = "#home";
+    window.location.hash = target;
+    return;
+  }
+  mainNavHasHomeBase = true;
+  try {
+    handleRoute();
+  } catch {}
+}
 
 const STORAGE_HISTORY = "nostube-history";
 const STORAGE_WATCHLATER = "nostube-watchlater";
@@ -182,30 +356,131 @@ let contacts = new Set();
 let contactsEvent = null;
 let profilesCache = new Map();
 
+let lastOverlayFocus = null;
+let lastSearchRenderQuery = null;
+const searchResultsCache = new Map();
+
 if (menuToggle) {
   menuToggle.addEventListener("click", () => {
     document.body.classList.toggle("sidebar-collapsed");
   });
 }
 
+function setShellInert(inert) {
+  if (!appShell) return;
+  try {
+    if (inert) {
+      appShell.setAttribute("aria-hidden", "true");
+      if ("inert" in appShell) appShell.inert = true;
+    } else {
+      appShell.removeAttribute("aria-hidden");
+      if ("inert" in appShell) appShell.inert = false;
+    }
+  } catch {}
+}
+
+function setBackgroundInert(inert) {
+  const targets = [topbar, appBody, mobileNav, miniPlayer].filter(Boolean);
+  targets.forEach((el) => {
+    try {
+      if (inert) {
+        el.setAttribute("aria-hidden", "true");
+        if ("inert" in el) el.inert = true;
+      } else {
+        el.removeAttribute("aria-hidden");
+        if ("inert" in el) el.inert = false;
+      }
+    } catch {}
+  });
+}
+
+function openSearchOverlay() {
+  if (!searchOverlay) return;
+  lastOverlayFocus = document.activeElement;
+  document.body.classList.add("is-search-overlay-open");
+  setBackgroundInert(true);
+  searchOverlay.classList.add("active");
+  try {
+    const input = searchOverlay.querySelector('input[type="search"]');
+    input?.focus();
+  } catch {}
+}
+
+function closeSearchOverlay({ restoreFocus = true } = {}) {
+  if (!searchOverlay) return;
+  searchOverlay.classList.remove("active");
+  document.body.classList.remove("is-search-overlay-open");
+  setBackgroundInert(false);
+  if (restoreFocus && lastOverlayFocus && lastOverlayFocus.focus) {
+    try {
+      lastOverlayFocus.focus();
+    } catch {}
+  }
+  lastOverlayFocus = null;
+}
+
+function focusTopbarSearchInput() {
+  const form = document.getElementById("search-form");
+  const input = form?.querySelector('input[type="search"]') || null;
+  if (!input) return;
+  try {
+    input.focus();
+    input.select?.();
+  } catch {}
+}
+
+function setTopbarSearchValue(value) {
+  const form = document.getElementById("search-form");
+  const input = form?.querySelector('input[type="search"]') || null;
+  if (!input) return;
+  input.value = String(value || "");
+  const clearBtn = form?.querySelector(".search-clear") || null;
+  if (clearBtn) {
+    clearBtn.hidden = !input.value;
+  }
+}
+
+function decodeUriComponentSafe(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch {
+    return String(value || "");
+  }
+}
+
+if (searchBackBtn) {
+  searchBackBtn.hidden = true;
+}
+
 function syncTopbarMode() {
   const mobile = isMobileUi();
   const route = getRoute();
   let useChannel = false;
+  let useSearch = false;
 
   if (mobile && route.page === "channel") {
     useChannel = true;
+  }
+
+  if (mobile && route.page === "search") {
+    useSearch = true;
   }
 
   if (mobile && route.page === "watch") {
     if (underlayDragPage === pageChannel) useChannel = true;
     if (watchTransitionUnderlay === pageChannel) useChannel = true;
     if (topbarUnderlayOverridePage === pageChannel) useChannel = true;
+
+    if (underlayDragPage === pageSearch) useSearch = true;
+    if (watchTransitionUnderlay === pageSearch) useSearch = true;
+    if (topbarUnderlayOverridePage === pageSearch) useSearch = true;
   }
 
   document.body.classList.toggle("is-channel-topbar", Boolean(useChannel));
+  document.body.classList.toggle("is-search-topbar", Boolean(useSearch));
+  const showBack = Boolean(useChannel || useSearch);
   const showChannelControls = Boolean(useChannel);
-  if (channelBackBtn) channelBackBtn.hidden = !showChannelControls;
+  if (channelBackBtn) channelBackBtn.hidden = !showBack;
   if (channelMoreAnchor) channelMoreAnchor.hidden = !showChannelControls;
   if (!showChannelControls) {
     closeMenu(channelMenu);
@@ -228,15 +503,24 @@ if (mobileNavLinks.length) {
         }
         return;
       }
-      const hashMap = {
-        home: "#home",
-        shorts: "#shorts",
-        subs: "#subs",
-        library: "#library",
-      };
-      const target = hashMap[key] || "#home";
-      window.location.hash = target;
+      navToMain(key);
     });
+  });
+}
+
+if (sidebarNavLinks.length) {
+  sidebarNavLinks.forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      navToMain(link.dataset.nav || "home");
+    });
+  });
+}
+
+if (brandLink) {
+  brandLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    navToMain("home");
   });
 }
 
@@ -686,28 +970,299 @@ if (authCopyNsec && authGeneratedNsec) {
   });
 }
 
-if (mobileSearch && searchOverlay) {
+if (mobileSearch) {
   mobileSearch.addEventListener("click", () => {
-    searchOverlay.classList.add("active");
+    navigateFromWatchTo("#search/");
+    requestAnimationFrame(() => focusTopbarSearchInput());
   });
 }
 
 if (searchClose && searchOverlay) {
   searchClose.addEventListener("click", () => {
-    searchOverlay.classList.remove("active");
+    closeSearchOverlay();
+  });
+}
+
+function extractSearchQuery() {
+  if (!searchOverlay) return "";
+  const input = searchOverlay.querySelector('input[type="search"]');
+  return String(input?.value || "").trim();
+}
+
+function setSearchQuery(value) {
+  if (!searchOverlay) return;
+  const input = searchOverlay.querySelector('input[type="search"]');
+  if (input) input.value = String(value || "");
+}
+
+function getSearchOverlaySuggestions() {
+  if (!searchOverlay) return null;
+  return searchOverlay.querySelector(".search-suggestions");
+}
+
+function normalizeSearchQuery(raw) {
+  return String(raw || "").trim();
+}
+
+function queryLooksLikeVideoId(query) {
+  const q = String(query || "").trim();
+  if (!q) return false;
+  if (/^[0-9a-f]{64}$/i.test(q)) return true;
+  if (/^[0-9a-f]{8,63}$/i.test(q)) return true;
+  if (/^(note|nevent)1[0-9a-z]+$/i.test(q)) return true;
+  return false;
+}
+
+function normalizeHashTag(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const tag = raw.startsWith("#") ? raw.slice(1) : raw;
+  return tag.trim();
+}
+
+function extractSearchWords(query) {
+  return String(query || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+}
+
+function matchesQueryLocally(video, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  const words = extractSearchWords(q);
+  const hay = `${video?.title || ""} ${video?.summary || ""}`.toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+async function searchNostrVideos(query, { limit = 80 } = {}) {
+  const q = normalizeSearchQuery(query);
+  if (!q) return [];
+
+  const since = Math.floor(Date.now() / 1000) - MAX_EVENT_AGE_DAYS * 86400;
+
+  const isTagOnly = /^#\S+$/.test(q);
+  const tag = isTagOnly ? normalizeHashTag(q) : "";
+
+  const primaryFilter = {
+    kinds: [21, 22],
+    limit,
+    since,
+  };
+
+  if (tag) {
+    primaryFilter["#t"] = [tag];
+  } else {
+    primaryFilter.search = q;
+  }
+
+  const events = new Map();
+  await Promise.all(
+    RELAYS.map((relay) =>
+      requestEvents(relay, primaryFilter, (event) => {
+        if (!events.has(event.id)) events.set(event.id, event);
+      })
+    )
+  );
+
+  let found = Array.from(events.values()).sort((a, b) => b.created_at - a.created_at);
+
+  if (!found.length && !tag) {
+    const fallbackEvents = new Map();
+    const fallbackFilter = { kinds: [21, 22], limit: Math.max(120, limit), since };
+    await Promise.all(
+      RELAYS.map((relay) =>
+        requestEvents(relay, fallbackFilter, (event) => {
+          if (!fallbackEvents.has(event.id)) fallbackEvents.set(event.id, event);
+        })
+      )
+    );
+    const candidate = Array.from(fallbackEvents.values()).sort((a, b) => b.created_at - a.created_at);
+    found = candidate.filter((event) => {
+      const parsed = parseVideoEvent(event);
+      return matchesQueryLocally(parsed, q);
+    });
+  }
+
+  return found;
+}
+
+function setSearchPageHeader(query) {
+  if (searchTitle) searchTitle.textContent = query ? `Search: ${query}` : "Search";
+  if (searchMeta) searchMeta.textContent = "Results from connected relays";
+}
+
+async function renderSearchPage(query) {
+  if (!searchFeed || !searchEmpty) return;
+  const q = normalizeSearchQuery(query);
+
+  if (q && lastSearchRenderQuery === q && searchFeed.childElementCount) {
+    setSearchPageHeader(q);
+    searchEmpty.hidden = true;
+    return;
+  }
+  lastSearchRenderQuery = q || null;
+
+  setSearchPageHeader(q);
+  if (!q) {
+    searchFeed.innerHTML = "";
+    searchEmpty.textContent = "Type something to search.";
+    searchEmpty.hidden = false;
+    return;
+  }
+
+  const cached = searchResultsCache.get(q) || null;
+  if (cached && Array.isArray(cached.events) && cached.events.length) {
+    searchEmpty.hidden = true;
+    renderVideos(
+      searchFeed,
+      searchEmpty,
+      cached.events.slice().sort((a, b) => b.created_at - a.created_at),
+      cached.profiles || new Map()
+    );
+    return;
+  }
+
+  searchFeed.innerHTML = "";
+  searchEmpty.textContent = "Searching relays…";
+  searchEmpty.hidden = false;
+
+  if (queryLooksLikeVideoId(q)) {
+    window.location.hash = `#watch/${encodeURIComponent(q)}`;
+    return;
+  }
+
+  let events = [];
+  try {
+    events = await searchNostrVideos(q, { limit: 80 });
+  } catch {
+    events = [];
+  }
+
+  if (!events.length) {
+    searchFeed.innerHTML = "";
+    searchEmpty.textContent = "No results found on connected relays.";
+    searchEmpty.hidden = false;
+    return;
+  }
+
+  const pubkeys = [...new Set(events.map((e) => e.pubkey).filter(Boolean))];
+  const profiles = await fetchProfiles(pubkeys);
+  profiles.forEach((value, key) => profilesCache.set(key, value));
+  searchEmpty.hidden = true;
+  renderVideos(searchFeed, searchEmpty, events.sort((a, b) => b.created_at - a.created_at), profiles);
+
+  try {
+    searchResultsCache.set(q, { events: events.slice(), profiles });
+  } catch {}
+}
+
+function navigateToSearch(query) {
+  const q = normalizeSearchQuery(query);
+  const currentRoute = getRoute();
+  if (currentRoute.page !== "search") {
+    lastNonSearchHash = window.location.hash || lastNonSearchHash || "#home";
+  }
+  window.location.hash = `#search/${encodeURIComponent(q)}`;
+}
+
+function performSearch(rawQuery) {
+  const q = normalizeSearchQuery(rawQuery);
+  navigateToSearch(q);
+}
+
+if (searchOverlay) {
+  const overlayInput = searchOverlay.querySelector('input[type="search"]');
+  const overlayBtn = searchOverlay.querySelector('button[aria-label="Search"]');
+  const suggestionEls = Array.from(searchOverlay.querySelectorAll(".suggestion"));
+  const suggestions = getSearchOverlaySuggestions();
+
+  const run = () => performSearch(extractSearchQuery());
+
+  if (overlayBtn) {
+    overlayBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (suggestions) suggestions.hidden = true;
+      closeSearchOverlay();
+      run();
+    });
+  }
+
+  if (overlayInput) {
+    overlayInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (suggestions) suggestions.hidden = true;
+        closeSearchOverlay();
+        run();
+      }
+    });
+  }
+
+  suggestionEls.forEach((el) => {
+    el.addEventListener("click", () => {
+      const value = String(el.textContent || "").trim();
+      setSearchQuery(value);
+      if (suggestions) suggestions.hidden = true;
+      closeSearchOverlay();
+      run();
+    });
+  });
+
+  // Focus trap for accessibility
+  searchOverlay.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const focusables = Array.from(
+      searchOverlay.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => !el.hasAttribute("disabled") && !el.getAttribute("aria-hidden"));
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 }
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && searchOverlay && searchOverlay.classList.contains("active")) {
-    searchOverlay.classList.remove("active");
+    closeSearchOverlay();
   }
 });
 
 const searchForm = document.getElementById("search-form");
 if (searchForm) {
+  const searchInput = searchForm.querySelector('input[type="search"]');
+  const clearBtn = searchForm.querySelector(".search-clear");
+
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      if (clearBtn) clearBtn.hidden = !String(searchInput.value || "");
+    });
+  }
+
+  if (clearBtn && searchInput) {
+    clearBtn.addEventListener("click", () => {
+      searchInput.value = "";
+      clearBtn.hidden = true;
+      focusTopbarSearchInput();
+    });
+  }
+
   searchForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    const q = String(searchInput?.value || "").trim();
+    performSearch(q);
   });
 }
 
@@ -1106,24 +1661,55 @@ function openMenuWithPosition(menu) {
 if (channelBackBtn) {
   channelBackBtn.addEventListener("click", () => {
     closeAllMenus();
-    const current = window.location.hash || "#home";
-    const target = channelEntryHash || miniLastHash || lastNonWatchHash || "#home";
-    if (target && target !== current) {
-      window.location.hash = target;
-    } else {
-      window.location.hash = "#home";
+    try {
+      if (history.length > 1) {
+        history.back();
+        return;
+      }
+    } catch {}
+    window.location.hash = "#home";
+  });
+}
+
+if (channelMoreBtn) {
+  channelMoreBtn.addEventListener("click", () => {
+    closeMenu(userMenu);
+    closeMenu(createMenu);
+    if (isMenuOpen(channelMenu)) closeMenu(channelMenu);
+    else {
+      closeAllMenus();
+      openMenuWithPosition(channelMenu);
     }
   });
 }
 
-if (channelMoreBtn && channelMenu) {
-  channelMoreBtn.addEventListener("click", () => {
-    if (channelMenu.hidden) {
+if (searchMoreBtn) {
+  searchMoreBtn.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+  });
+  searchMoreBtn.addEventListener("click", () => {
+    closeMenu(userMenu);
+    closeMenu(createMenu);
+    closeMenu(channelMenu);
+    if (isMenuOpen(searchMenu)) closeMenu(searchMenu);
+    else {
       closeAllMenus();
-      openMenuWithPosition(channelMenu);
-    } else {
-      closeMenu(channelMenu);
+      openMenuWithPosition(searchMenu);
     }
+  });
+}
+
+if (searchMenuFilters) {
+  searchMenuFilters.addEventListener("click", () => {
+    closeMenu(searchMenu);
+    showToast("Search filters coming soon");
+  });
+}
+
+if (searchMenuHelp) {
+  searchMenuHelp.addEventListener("click", () => {
+    closeMenu(searchMenu);
+    showToast("Help & feedback coming soon");
   });
 }
 
@@ -1627,6 +2213,7 @@ function setActivePage(page) {
     pageHistory,
     pageWatchlater,
     pageLiked,
+    pageSearch,
     pageWatch,
     pageChannel,
   ];
@@ -1639,6 +2226,7 @@ function setActivePage(page) {
     pageWatch.classList.add("is-active");
   }
   document.body.classList.toggle("is-watch", page === pageWatch);
+  document.body.classList.toggle("is-search", page === pageSearch);
 
   if (topbarUnderlayOverridePage) {
     topbarUnderlayOverridePage = null;
@@ -1720,6 +2308,7 @@ function getPageForHash(hash) {
   if (page === "history") return pageHistory;
   if (page === "watchlater") return pageWatchlater;
   if (page === "liked") return pageLiked;
+  if (page === "search") return pageSearch;
   if (page === "channel") return pageChannel;
   return pageHome;
 }
@@ -1740,7 +2329,12 @@ function restoreWindowScrollForHash(hash) {
 
 function setUnderlayDragVisible(visible) {
   if (!isMobileUi()) return;
-  const next = visible ? getPageForHash(miniLastHash || lastNonWatchHash || "#home") : null;
+  const route = getRoute();
+  const targetHash =
+    visible && route.page === "watch" && !isMini
+      ? lastNonWatchHash || "#home"
+      : miniLastHash || lastNonWatchHash || "#home";
+  const next = visible ? getPageForHash(targetHash) : null;
   const currentPage = getPageForHash(window.location.hash || "#home");
   if (underlayDragPage && underlayDragPage !== next) {
     underlayDragPage.classList.remove("is-underlay");
@@ -1754,7 +2348,6 @@ function setUnderlayDragVisible(visible) {
     underlayDragPage.classList.add("is-underlay");
     underlayDragPage.classList.add("is-active");
 
-    const targetHash = miniLastHash || lastNonWatchHash || "#home";
     requestAnimationFrame(() => restoreWindowScrollForHash(targetHash));
   } else {
     underlayDragPage.classList.remove("is-underlay");
@@ -1770,7 +2363,11 @@ function startDockHold({ keepUnderlay = false } = {}) {
   document.body.classList.add("is-dock-hold");
   if (keepUnderlay) {
     setUnderlayDragVisible(true);
-    const targetHash = miniLastHash || lastNonWatchHash || "#home";
+    const route = getRoute();
+    const targetHash =
+      route.page === "watch" && !isMini
+        ? lastNonWatchHash || "#home"
+        : miniLastHash || lastNonWatchHash || "#home";
     requestAnimationFrame(() => restoreWindowScrollForHash(targetHash));
   }
 
@@ -2159,6 +2756,7 @@ function enterMiniPlayer() {
   snapMiniPlayerTransitionOnce();
   setMiniVisible(true);
   setDockDragDy(0);
+
   const targetHash = miniLastHash && miniLastHash !== "#watch" ? miniLastHash : "#home";
   try {
     scrollRestorePending = {
@@ -2168,6 +2766,12 @@ function enterMiniPlayer() {
   } catch {
     scrollRestorePending = { hash: targetHash, y: 0 };
   }
+
+  try {
+    history.back();
+    return;
+  } catch {}
+
   window.location.hash = targetHash;
 }
 
@@ -2192,7 +2796,16 @@ function exitMiniPlayer() {
     topbarUnderlayOverridePage = getPageForHash(window.location.hash || "#home");
     syncTopbarMode();
     resumeWatchOnRoute = true;
-    window.location.hash = `#watch/${video.id}`;
+    const nextHash = `#watch/${video.id}`;
+    try {
+      history.pushState(history.state || {}, "", nextHash);
+    } catch {
+      window.location.hash = nextHash;
+      return;
+    }
+    try {
+      handleRoute();
+    } catch {}
   }
 }
 
@@ -2224,7 +2837,16 @@ function expandFromMiniToVideo(id) {
   lastWatchedVideoId = nextId;
   topbarUnderlayOverridePage = getPageForHash(window.location.hash || "#home");
   syncTopbarMode();
-  window.location.hash = `#watch/${nextId}`;
+  const nextHash = `#watch/${nextId}`;
+  try {
+    history.pushState(history.state || {}, "", nextHash);
+  } catch {
+    window.location.hash = nextHash;
+    return;
+  }
+  try {
+    handleRoute();
+  } catch {}
 }
 
 function setDockDragDy(nextDy, alphaDy) {
@@ -2535,6 +3157,16 @@ function resetPageScroll() {
     scrollRestorePending = null;
     return;
   }
+
+  if (scrollPositions.has(hash)) {
+    const y = scrollPositions.get(hash) || 0;
+    requestAnimationFrame(() => {
+      try {
+        window.scrollTo(0, y);
+      } catch {}
+    });
+    return;
+  }
   try {
     window.scrollTo(0, 0);
   } catch {}
@@ -2653,6 +3285,20 @@ function handleRoute() {
   const route = getRoute();
   const changedPage = route.page !== prevRoute.page;
 
+  if (route.page) {
+    if (route.page !== "watch") {
+      lastNonWatchHash = window.location.hash || "#home";
+    }
+    if (route.page !== "search") {
+      lastNonSearchHash = window.location.hash || "#home";
+    }
+    if (isMini && route.page !== "watch") {
+      try {
+        miniLastHash = window.location.hash || miniLastHash || lastNonWatchHash || "#home";
+      } catch {}
+    }
+  }
+
   syncTopbarMode();
 
   if (changedPage && route.page === "channel" && prevRoute.page !== "channel") {
@@ -2668,11 +3314,16 @@ function handleRoute() {
 
   if (changedPage && prevRoute.page === "watch" && route.page !== "watch") {
     if (!isMini) {
+      if (suppressMiniOnLeaveWatchOnce) {
+        suppressMiniOnLeaveWatchOnce = false;
+        stopWatchPlayback();
+      } else {
       const isPlaying = Boolean(watchVideo && !watchVideo.paused && !watchVideo.ended);
       if (isPlaying && lastWatchedVideoId) {
         enableMiniPlayerUi();
       } else {
         stopWatchPlayback();
+      }
       }
     }
   }
@@ -2686,6 +3337,10 @@ function handleRoute() {
   }
   handleRoute._lastRoute = route;
   handleRoute._lastHash = window.location.hash || "#home";
+
+  if (isMini && route.page !== "watch") {
+    miniLastHash = window.location.hash || miniLastHash || "#home";
+  }
 
   if (route.page === "shorts") {
     setActivePage(pageShorts);
@@ -2743,9 +3398,19 @@ function handleRoute() {
     updateSubscribeButton();
     return;
   }
+  if (route.page === "search") {
+    setActivePage(pageSearch);
+    setActiveNav("");
+    if (!(prevRoute.page === "search" && String(prevRoute.id || "") === String(route.id || ""))) {
+      void renderSearchPage(route.id || "");
+    }
+    return;
+  }
   if (route.page) {
-    if (route.page !== "watch") {
-      lastNonWatchHash = window.location.hash || "#home";
+    if (isMini && route.page !== "watch") {
+      try {
+        miniLastHash = window.location.hash || miniLastHash || lastNonWatchHash || "#home";
+      } catch {}
     }
   }
   if (route.page === "channel") {
@@ -2766,7 +3431,7 @@ if (watchChannelName) {
   watchChannelName.addEventListener("click", () => {
     const video = getCurrentWatchVideo();
     if (!video?.pubkey) return;
-    window.location.hash = `#channel/${video.pubkey}`;
+    navigateFromWatchTo(`#channel/${video.pubkey}`);
   });
 }
 
@@ -2774,7 +3439,7 @@ if (watchChannelAvatar) {
   watchChannelAvatar.addEventListener("click", () => {
     const video = getCurrentWatchVideo();
     if (!video?.pubkey) return;
-    window.location.hash = `#channel/${video.pubkey}`;
+    navigateFromWatchTo(`#channel/${video.pubkey}`);
   });
 }
 
@@ -3274,7 +3939,47 @@ async function initNostrFeed() {
 }
 
 initNostrFeed();
-window.addEventListener("hashchange", handleRoute);
+window.addEventListener("hashchange", () => {
+  if (homeResetInProgress) return;
+  try {
+    handleRoute();
+  } catch {}
+});
+window.addEventListener("popstate", () => {
+  if (homeResetInProgress) {
+    const hash = window.location.hash || "#home";
+    if (hash === "#home" || hash === "#") {
+      homeResetInProgress = false;
+      if (homeResetGuardTimer) {
+        try {
+          window.clearTimeout(homeResetGuardTimer);
+        } catch {}
+        homeResetGuardTimer = 0;
+      }
+      mainNavHasHomeBase = true;
+      if (pendingMainAfterHomeReset) {
+        const next = pendingMainAfterHomeReset;
+        pendingMainAfterHomeReset = "";
+        try {
+          navPush(next);
+        } catch {}
+        return;
+      }
+      try {
+        handleRoute();
+      } catch {}
+      return;
+    }
+    try {
+      history.back();
+      return;
+    } catch {}
+    homeResetInProgress = false;
+  }
+  try {
+    handleRoute();
+  } catch {}
+});
 handleRoute();
 
 let scrollTrackRaf = 0;
@@ -3301,6 +4006,9 @@ window.addEventListener("resize", () => {
   const next = isMobileUi();
   if (next === _lastIsMobileUi) return;
   _lastIsMobileUi = next;
+  try {
+    syncTopbarMode();
+  } catch {}
   if (!isMini) return;
   try {
     handleRoute();
@@ -3362,6 +4070,24 @@ function openWatchFromCard(card) {
   }
 }
 
+function navigateFromWatchTo(nextHash) {
+  const route = getRoute();
+  const target = String(nextHash || "") || "#home";
+  if (route.page !== "watch" || isMini) {
+    window.location.hash = target;
+    return;
+  }
+  try {
+    history.replaceState(history.state || {}, "", target);
+  } catch {
+    window.location.hash = target;
+    return;
+  }
+  try {
+    handleRoute();
+  } catch {}
+}
+
 function wireVideoClicks(container) {
   if (!container) return;
   container.addEventListener("click", (event) => {
@@ -3369,7 +4095,7 @@ function wireVideoClicks(container) {
     if (!card) return;
     const channelTarget = event.target.closest(".video-channel, .channel-avatar");
     if (channelTarget && card.dataset.videoPubkey) {
-      window.location.hash = `channel/${card.dataset.videoPubkey}`;
+      navigateFromWatchTo(`#channel/${card.dataset.videoPubkey}`);
       return;
     }
     openWatchFromCard(card);
@@ -3380,6 +4106,7 @@ wireVideoClicks(recommendedFeed);
 wireVideoClicks(latestFeed);
 wireVideoClicks(shortsGrid);
 wireVideoClicks(channelFeed);
+wireVideoClicks(searchFeed);
 
 if (watchList) {
   watchList.addEventListener("click", (event) => {
@@ -3516,7 +4243,7 @@ if (menuYourChannel) {
       openAuthModal("chooser");
       return;
     }
-    window.location.hash = `channel/${authState.pubkey}`;
+    navigateFromWatchTo(`#channel/${authState.pubkey}`);
   });
 }
 
@@ -3842,7 +4569,12 @@ if (watchVideo) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && pageWatch?.classList.contains("is-active")) {
-    window.location.hash = lastNonWatchHash || "#home";
+    suppressMiniOnLeaveWatchOnce = true;
     teardownWatchPlayer();
+    try {
+      history.back();
+      return;
+    } catch {}
+    window.location.hash = lastNonWatchHash || "#home";
   }
 });

@@ -31,6 +31,9 @@
       <div class="topbar-center">
         <form class="search" id="search-form" role="search">
           <input type="search" placeholder="Search" aria-label="Search" />
+          <button class="icon-btn search-clear" type="button" aria-label="Clear search" hidden>
+            <span class="material-symbols-rounded">close</span>
+          </button>
           <button class="icon-btn search-btn" type="submit" aria-label="Search">
             <span class="material-symbols-rounded">search</span>
           </button>
@@ -43,6 +46,21 @@
         <button class="icon-btn mobile-search" id="mobile-search" aria-label="Search">
           <span class="material-symbols-rounded">search</span>
         </button>
+        <div class="menu-anchor" id="search-more-anchor">
+          <button class="icon-btn" id="search-more" aria-label="More" type="button">
+            <span class="material-symbols-rounded">more_vert</span>
+          </button>
+          <div class="menu" id="search-menu" hidden>
+            <button class="menu-item" id="search-menu-filters" type="button">
+              <span class="material-symbols-rounded">tune</span>
+              Search filters
+            </button>
+            <button class="menu-item" id="search-menu-help" type="button">
+              <span class="material-symbols-rounded">help</span>
+              Help &amp; feedback
+            </button>
+          </div>
+        </div>
         <div class="menu-anchor" id="channel-more-anchor" hidden>
           <button class="icon-btn" id="channel-more" aria-label="More" type="button">
             <span class="material-symbols-rounded">more_vert</span>
@@ -238,6 +256,22 @@
             <h2 class="feed-title">Liked videos</h2>
             <div class="feed" id="feed-liked"></div>
             <div class="feed-empty" id="feed-liked-empty">No liked videos yet.</div>
+          </section>
+        </section>
+
+        <section class="page page-search" id="page-search">
+          <div class="search-header">
+            <button class="icon-btn" id="search-back" aria-label="Back" type="button">
+              <span class="material-symbols-rounded">arrow_back</span>
+            </button>
+            <div class="search-header-text">
+              <h1 class="search-title" id="search-title">Search</h1>
+              <div class="search-meta" id="search-meta">Results from connected relays</div>
+            </div>
+          </div>
+          <section class="feed-section">
+            <div class="feed" id="feed-search"></div>
+            <div class="feed-empty" id="feed-search-empty">Type something to search.</div>
           </section>
         </section>
 
