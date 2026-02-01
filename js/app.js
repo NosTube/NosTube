@@ -2480,18 +2480,50 @@ async function exitFullscreenIfNeeded() {
 
 function toggleFullscreen() {
   if (!watchPlayer) return;
-  if (document.fullscreenElement) {
+  const fsEl = document.fullscreenElement;
+
+  if (fsEl) {
     try {
       document.exitFullscreen?.();
-    } catch {}
-  } else {
-    try {
-      const p = watchPlayer.requestFullscreen?.();
-      if (p && typeof p.then === "function") {
-        p.then(() => lockLandscapeIfSupported()).catch(() => {});
-      }
+      return;
     } catch {}
   }
+
+  const vid = watchVideo;
+  const request = async () => {
+    if (vid?.requestFullscreen) {
+      await vid.requestFullscreen();
+      return true;
+    }
+    if (watchPlayer?.requestFullscreen) {
+      await watchPlayer.requestFullscreen();
+      return true;
+    }
+    return false;
+  };
+
+  Promise.resolve()
+    .then(async () => {
+      try {
+        const ok = await request();
+        if (ok) {
+          await lockLandscapeIfSupported();
+          return;
+        }
+      } catch {}
+
+      try {
+        if (vid && typeof vid.webkitEnterFullscreen === "function") {
+          vid.webkitEnterFullscreen();
+          return;
+        }
+      } catch {}
+
+      showToast("Fullscreen not supported in this app");
+    })
+    .catch(() => {
+      showToast("Fullscreen not supported in this app");
+    });
 }
 
 function setActivePage(page) {
@@ -5108,6 +5140,18 @@ document.addEventListener("fullscreenchange", () => {
 if (watchVideo) {
   watchVideo.addEventListener("loadedmetadata", () => {
     updateWatchProgress();
+  });
+  watchVideo.addEventListener("webkitbeginfullscreen", () => {
+    if (watchFullscreenIcon) {
+      watchFullscreenIcon.textContent = "fullscreen_exit";
+    }
+    void lockLandscapeIfSupported();
+  });
+  watchVideo.addEventListener("webkitendfullscreen", () => {
+    if (watchFullscreenIcon) {
+      watchFullscreenIcon.textContent = "fullscreen";
+    }
+    unlockOrientationIfSupported();
   });
   watchVideo.addEventListener("timeupdate", updateWatchProgress);
   watchVideo.addEventListener("durationchange", updateWatchProgress);
