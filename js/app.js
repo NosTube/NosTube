@@ -233,6 +233,23 @@ function getCurrentVideoAspect() {
   return 0;
 }
 
+function notifyAndroidWrapper(fullscreen, rotate) {
+  if (!isAndroidMode()) return;
+  try {
+    const fs = fullscreen ? "1" : "0";
+    const rot = rotate ? "1" : "0";
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = `nostube://fullscreen?fs=${fs}&rot=${rot}`;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => {
+      try {
+        iframe.remove();
+      } catch {}
+    }, 0);
+  } catch {}
+}
+
 function setAndroidUrlParamState(next) {
   if (!isAndroidMode()) return;
   try {
@@ -253,12 +270,14 @@ function setAndroidUrlParamState(next) {
 function enterSimFullscreen(shouldRotate) {
   document.body.classList.add("is-sim-fullscreen");
   setAndroidUrlParamState({ fullscreen: true, rotate: Boolean(shouldRotate) });
+  notifyAndroidWrapper(true, Boolean(shouldRotate));
   if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen_exit";
 }
 
 function exitSimFullscreen() {
   document.body.classList.remove("is-sim-fullscreen");
   setAndroidUrlParamState({ fullscreen: false, rotate: false });
+  notifyAndroidWrapper(false, false);
   if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen";
 }
 
