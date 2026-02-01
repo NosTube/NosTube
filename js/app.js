@@ -187,6 +187,11 @@ let watchTransitionListener = null;
 let dockHoldTimer = 0;
 let dockHoldListener = null;
 let suppressMiniOnLeaveWatchOnce = false;
+let miniResumeTime = 0;
+let miniWasPlaying = false;
+let miniResumeVideoId = "";
+let suppressWatchAutoplayOnce = false;
+let fullscreenOrientationLocked = false;
 let mainNavHasHomeBase = false;
 let homeResetInProgress = false;
 let homeResetGuardTimer = 0;
@@ -847,7 +852,6 @@ async function renderSubscriptionsPage() {
 function exitMiniPlayerAndStop() {
   isMini = false;
   document.body.classList.remove("is-mini");
-  setMiniVisible(false);
   setDockDragDy(0);
   if (watchVideoDocked && watchVideo && watchPlayer && watchVideo.parentElement !== watchPlayer) {
     try {
@@ -859,6 +863,7 @@ function exitMiniPlayerAndStop() {
     } catch {}
     watchVideoDocked = false;
   }
+  setMiniVisible(false);
   stopWatchPlayback();
   lastWatchedVideoId = "";
   try {
@@ -868,6 +873,22 @@ function exitMiniPlayerAndStop() {
     };
   } catch {}
   handleRoute();
+}
+
+function undockWatchVideoFromMini() {
+  if (!watchVideoDocked || !watchVideo || !watchPlayer) return;
+  if (watchVideo.parentElement === watchPlayer) {
+    watchVideoDocked = false;
+    return;
+  }
+  try {
+    if (watchPoster) {
+      watchPlayer.insertBefore(watchVideo, watchPoster);
+    } else {
+      watchPlayer.appendChild(watchVideo);
+    }
+  } catch {}
+  watchVideoDocked = false;
 }
 
 function renderLocalPages() {
@@ -1233,7 +1254,13 @@ async function renderSearchPage(query) {
   searchEmpty.hidden = false;
 
   if (queryLooksLikeVideoId(q)) {
-    window.location.hash = `#watch/${encodeURIComponent(q)}`;
+    const target = `#watch/${encodeURIComponent(q)}`;
+    const route = getRoute();
+    if (route.page === "watch" && !isMini) {
+      navigateFromWatchTo(target);
+    } else {
+      navToDeep(target);
+    }
     return;
   }
 
@@ -1268,7 +1295,14 @@ function navigateToSearch(query) {
   if (currentRoute.page !== "search") {
     lastNonSearchHash = window.location.hash || lastNonSearchHash || "#home";
   }
-  window.location.hash = `#search/${encodeURIComponent(q)}`;
+  const target = `#search/${encodeURIComponent(q)}`;
+
+  // Route through our navigation helpers so history.state stays consistent.
+  if (currentRoute.page === "watch" && !isMini) {
+    navigateFromWatchTo(target);
+    return;
+  }
+  navToDeep(target);
 }
 
 function performSearch(rawQuery) {
@@ -1811,10 +1845,20 @@ if (channelBackBtn) {
       } catch {}
     }
 
-    // If we entered a channel via a hash navigation that did not go through our
-    // history helpers, history.state may not include our appIndex. In that case,
-    // prefer the computed channel entry hash (e.g. #library) to mimic browser back.
-    const target = channelEntryHash && channelEntryHash !== "#home" ? channelEntryHash : "#home";
+    // If we entered a deep page via a hash navigation that did not go through our
+    // history helpers, history.state may not include our appIndex.
+    // Prefer the computed entry hash to mimic browser back.
+    const route = getRoute();
+    let target = "#home";
+    if (route.page === "search") {
+      target = lastNonSearchHash || "#home";
+    } else if (route.page === "channel") {
+      target = channelEntryHash || "#home";
+    } else if (route.page === "history" || route.page === "watchlater" || route.page === "liked") {
+      target = "#library";
+    }
+
+    if (!target || /^#(search|channel)\b/i.test(target)) target = "#home";
     mainNavHasHomeBase = true;
     navReplace(target);
   });
@@ -2381,12 +2425,72 @@ function toggleMute() {
   setVolumeState();
 }
 
+function shouldLockLandscapeOnFullscreen() {
+  if (!isMobileUi()) return false;
+  if (!watchVideo) return false;
+  const w = Number(watchVideo.videoWidth) || 0;
+  const h = Number(watchVideo.videoHeight) || 0;
+  if (!w || !h) return false;
+  return w / h > 1;
+}
+
+async function lockLandscapeIfSupported() {
+  if (!shouldLockLandscapeOnFullscreen()) return;
+  const orientation = window.screen?.orientation;
+  if (!orientation || typeof orientation.lock !== "function") return;
+  try {
+    await orientation.lock("landscape");
+    fullscreenOrientationLocked = true;
+  } catch {}
+}
+
+function unlockOrientationIfSupported() {
+  if (!fullscreenOrientationLocked) return;
+  fullscreenOrientationLocked = false;
+  const orientation = window.screen?.orientation;
+  if (!orientation || typeof orientation.unlock !== "function") return;
+  try {
+    orientation.unlock();
+  } catch {}
+}
+
+async function exitFullscreenIfNeeded() {
+  if (!document.fullscreenElement) return;
+  const done = new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        document.removeEventListener("fullscreenchange", onChange);
+      } catch {}
+      resolve();
+    };
+    const onChange = () => {
+      if (!document.fullscreenElement) finish();
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    setTimeout(finish, 800);
+  });
+  try {
+    document.exitFullscreen?.();
+  } catch {}
+  await done;
+}
+
 function toggleFullscreen() {
   if (!watchPlayer) return;
   if (document.fullscreenElement) {
-    document.exitFullscreen?.();
+    try {
+      document.exitFullscreen?.();
+    } catch {}
   } else {
-    watchPlayer.requestFullscreen?.();
+    try {
+      const p = watchPlayer.requestFullscreen?.();
+      if (p && typeof p.then === "function") {
+        p.then(() => lockLandscapeIfSupported()).catch(() => {});
+      }
+    } catch {}
   }
 }
 
@@ -2588,6 +2692,38 @@ function setActiveNav(key) {
       link.classList.toggle("is-active", link.dataset.nav === key);
     });
   }
+}
+
+function mainNavKeyFromHash(hash) {
+  const value = String(hash || "");
+  if (value === "#home") return "home";
+  if (value === "#shorts") return "shorts";
+  if (value === "#subs") return "subs";
+  if (value === "#library") return "library";
+  return "";
+}
+
+function getLineageMainNavKey(route) {
+  if (!route?.page) return "home";
+  if (route.page === "home") return "home";
+  if (route.page === "shorts") return "shorts";
+  if (route.page === "subs") return "subs";
+  if (route.page === "library") return "library";
+
+  // Library deep pages should keep Library active.
+  if (route.page === "history" || route.page === "watchlater" || route.page === "liked") {
+    return "library";
+  }
+
+  // Channel/search should keep the main tab you came from active (when possible).
+  if (route.page === "channel") {
+    return mainNavKeyFromHash(channelEntryHash) || "home";
+  }
+  if (route.page === "search") {
+    return mainNavKeyFromHash(lastNonSearchHash) || "home";
+  }
+
+  return "home";
 }
 
 function getRoute() {
@@ -2864,13 +3000,45 @@ function showWatchForVideo(video) {
   if (watchVideo && video.url) {
     watchVideo.volume = lastVolume;
     watchVideo.muted = false;
-    watchVideo.play().catch(() => {
-      if (watchStatus) {
-        watchStatus.textContent = "Tap to play";
-        watchStatus.hidden = false;
+
+    const shouldSuppress = suppressWatchAutoplayOnce;
+    suppressWatchAutoplayOnce = false;
+    if (shouldSuppress) {
+      const canResume = String(video.id || "") && String(video.id || "") === String(miniResumeVideoId || "");
+      if (!canResume) {
+        miniResumeTime = 0;
+        miniWasPlaying = false;
+        miniResumeVideoId = "";
       }
-      setPlayState();
-    });
+      const t = Number.isFinite(miniResumeTime) ? miniResumeTime : 0;
+      if (t > 0 && canResume) {
+        try {
+          watchVideo.currentTime = t;
+        } catch {}
+      }
+      if (!miniWasPlaying || !canResume) {
+        try {
+          watchVideo.pause();
+        } catch {}
+        setPlayState();
+      } else {
+        watchVideo.play().catch(() => {
+          if (watchStatus) {
+            watchStatus.textContent = "Tap to play";
+            watchStatus.hidden = false;
+          }
+          setPlayState();
+        });
+      }
+    } else {
+      watchVideo.play().catch(() => {
+        if (watchStatus) {
+          watchStatus.textContent = "Tap to play";
+          watchStatus.hidden = false;
+        }
+        setPlayState();
+      });
+    }
   }
 
   buildWatchList(video.id);
@@ -2887,6 +3055,21 @@ function setMiniVisible(visible) {
 }
 
 function enableMiniPlayerUi() {
+  // Some flows minimize the player without calling enterMiniPlayer() (e.g.
+  // leaving watch while playing). If fullscreen is active, exit it first.
+  if (isMobileUi() && document.fullscreenElement) {
+    if (!enableMiniPlayerUi._fsExitPending) {
+      enableMiniPlayerUi._fsExitPending = true;
+      exitFullscreenIfNeeded()
+        .catch(() => {})
+        .finally(() => {
+          enableMiniPlayerUi._fsExitPending = false;
+          enableMiniPlayerUi();
+        });
+    }
+    return;
+  }
+
   if (isMini) return;
   isMini = true;
   document.body.classList.add("is-mini");
@@ -2916,10 +3099,34 @@ function enableMiniPlayerUi() {
 }
 
 function enterMiniPlayer() {
+  // If we're currently fullscreen (common on mobile), exit fullscreen first.
+  // This avoids a broken mixed state where fullscreen + mini docking conflict.
+  if (isMobileUi && typeof isMobileUi === "function") {
+    if (isMobileUi() && document.fullscreenElement) {
+      if (!enterMiniPlayer._fsExitPending) {
+        enterMiniPlayer._fsExitPending = true;
+        exitFullscreenIfNeeded()
+          .catch(() => {})
+          .finally(() => {
+            enterMiniPlayer._fsExitPending = false;
+            enterMiniPlayer();
+          });
+      }
+      return;
+    }
+  }
+
   if (isMini) return;
   isMini = true;
   document.body.classList.add("is-mini");
+
+  if (watchVideo) {
+    miniResumeTime = Number.isFinite(watchVideo.currentTime) ? watchVideo.currentTime : 0;
+    miniWasPlaying = Boolean(!watchVideo.paused && !watchVideo.ended);
+  }
+
   const video = getCurrentWatchVideo() || videoStore.get(lastWatchedVideoId);
+  miniResumeVideoId = String(video?.id || lastWatchedVideoId || "");
   if (miniPlayerTitle) miniPlayerTitle.textContent = video?.title || "Now playing";
   if (miniPlayerVideo) {
     const thumb = video?.thumb || "";
@@ -2965,24 +3172,24 @@ function enterMiniPlayer() {
 
 function exitMiniPlayer() {
   if (!isMini) return;
+
+  if (watchVideo) {
+    miniResumeTime = Number.isFinite(watchVideo.currentTime) ? watchVideo.currentTime : miniResumeTime;
+    miniWasPlaying = Boolean(!watchVideo.paused && !watchVideo.ended);
+  }
+
+  miniResumeVideoId = String(lastWatchedVideoId || miniResumeVideoId || "");
+
+  // IMPORTANT: avoid placing <video> in any display:none subtree during restore.
+  // We'll keep mini visible until the watch page is activated, then undock.
   isMini = false;
   document.body.classList.remove("is-mini");
-  setMiniVisible(false);
   setDockDragDy(0);
-  if (watchVideoDocked && watchVideo && watchPlayer && watchVideo.parentElement !== watchPlayer) {
-    try {
-      if (watchPoster) {
-        watchPlayer.insertBefore(watchVideo, watchPoster);
-      } else {
-        watchPlayer.appendChild(watchVideo);
-      }
-    } catch {}
-    watchVideoDocked = false;
-  }
   const video = videoStore.get(lastWatchedVideoId);
   if (video?.id) {
     topbarUnderlayOverridePage = getPageForHash(window.location.hash || "#home");
     syncTopbarMode();
+    suppressWatchAutoplayOnce = true;
     resumeWatchOnRoute = true;
     const nextHash = `#watch/${video.id}`;
     try {
@@ -2991,9 +3198,13 @@ function exitMiniPlayer() {
       window.location.hash = nextHash;
       return;
     }
-    try {
-      handleRoute();
-    } catch {}
+
+    // navPush already calls handleRoute(). Defer undock/hide until after the
+    // watch page becomes active to avoid any playback hiccup.
+    requestAnimationFrame(() => {
+      undockWatchVideoFromMini();
+      setMiniVisible(false);
+    });
   }
 }
 
@@ -3007,34 +3218,31 @@ function expandFromMiniToVideo(id) {
   try {
     miniLastHash = window.location.hash || miniLastHash || lastNonWatchHash || "#home";
   } catch {}
+  clearDockDrag();
+  // Switching to a different watch target while minimized should NOT reuse the
+  // previous video's resume time/play state.
+  miniResumeTime = 0;
+  miniWasPlaying = false;
+  miniResumeVideoId = "";
+  suppressWatchAutoplayOnce = false;
+
   isMini = false;
   document.body.classList.remove("is-mini");
-  setMiniVisible(false);
-  clearDockDrag();
-  if (watchVideoDocked && watchVideo && watchPlayer && watchVideo.parentElement !== watchPlayer) {
-    try {
-      if (watchPoster) {
-        watchPlayer.insertBefore(watchVideo, watchPoster);
-      } else {
-        watchPlayer.appendChild(watchVideo);
-      }
-    } catch {}
-    watchVideoDocked = false;
-  }
   resumeWatchOnRoute = false;
   lastWatchedVideoId = nextId;
   topbarUnderlayOverridePage = getPageForHash(window.location.hash || "#home");
   syncTopbarMode();
+
+  // Ensure the <video> is back in the watch page container before we load a new src.
+  undockWatchVideoFromMini();
+  setMiniVisible(false);
+
   const nextHash = `#watch/${nextId}`;
   try {
-    history.pushState(history.state || {}, "", nextHash);
+    navPush(nextHash);
   } catch {
     window.location.hash = nextHash;
-    return;
   }
-  try {
-    handleRoute();
-  } catch {}
 }
 
 function setDockDragDy(nextDy, alphaDy) {
@@ -3548,23 +3756,40 @@ function handleRoute() {
   }
   if (route.page === "history") {
     setActivePage(pageHistory);
-    setActiveNav("history");
+    setActiveNav(getLineageMainNavKey(route));
     renderLocalPages();
     return;
   }
   if (route.page === "watchlater") {
     setActivePage(pageWatchlater);
-    setActiveNav("watchlater");
+    setActiveNav(getLineageMainNavKey(route));
     renderLocalPages();
     return;
   }
   if (route.page === "liked") {
     setActivePage(pageLiked);
-    setActiveNav("liked");
+    setActiveNav(getLineageMainNavKey(route));
     renderLocalPages();
     return;
   }
   if (route.page === "watch") {
+    // If a new watch id is opened while the old video is minimized, treat this
+    // as a clean switch, not a restore of the previous video's state.
+    if (isMini) {
+      const nextId = String(route.id || "");
+      const dockedId = String(miniResumeVideoId || lastWatchedVideoId || "");
+      if (nextId && dockedId && nextId !== dockedId) {
+        miniResumeTime = 0;
+        miniWasPlaying = false;
+        miniResumeVideoId = "";
+        suppressWatchAutoplayOnce = false;
+        isMini = false;
+        document.body.classList.remove("is-mini");
+        undockWatchVideoFromMini();
+        setMiniVisible(false);
+        syncTopbarMode();
+      }
+    }
     if (resumeWatchOnRoute) {
       resumeWatchOnRoute = false;
       setActivePage(pageWatch);
@@ -3586,7 +3811,7 @@ function handleRoute() {
   }
   if (route.page === "search") {
     setActivePage(pageSearch);
-    setActiveNav("");
+    setActiveNav(getLineageMainNavKey(route));
     if (!(prevRoute.page === "search" && String(prevRoute.id || "") === String(route.id || ""))) {
       void renderSearchPage(route.id || "");
     }
@@ -3605,7 +3830,7 @@ function handleRoute() {
     } else {
       setActivePage(pageHome);
     }
-    setActiveNav("");
+    setActiveNav(getLineageMainNavKey(route));
     updateChannelActions(route.id);
     return;
   }
@@ -4403,7 +4628,7 @@ function navigateFromWatchTo(nextHash) {
   const route = getRoute();
   const target = String(nextHash || "") || "#home";
   if (route.page !== "watch" || isMini) {
-    window.location.hash = target;
+    navToDeep(target);
     return;
   }
   try {
@@ -4871,6 +5096,12 @@ if (watchSubscribeBtn) {
 document.addEventListener("fullscreenchange", () => {
   if (watchFullscreenIcon) {
     watchFullscreenIcon.textContent = document.fullscreenElement ? "fullscreen_exit" : "fullscreen";
+  }
+
+  if (document.fullscreenElement) {
+    void lockLandscapeIfSupported();
+  } else {
+    unlockOrientationIfSupported();
   }
 });
 
