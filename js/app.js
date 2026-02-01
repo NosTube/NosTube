@@ -2490,40 +2490,33 @@ function toggleFullscreen() {
   }
 
   const vid = watchVideo;
-  const request = async () => {
-    if (vid?.requestFullscreen) {
-      await vid.requestFullscreen();
-      return true;
+
+  // IMPORTANT: on Android WebView, fullscreen often requires a *direct* user
+  // gesture. Avoid any async hop before calling requestFullscreen().
+  try {
+    const p = vid?.requestFullscreen
+      ? vid.requestFullscreen()
+      : watchPlayer?.requestFullscreen
+        ? watchPlayer.requestFullscreen()
+        : null;
+    if (p && typeof p.catch === "function") {
+      p.catch(() => {
+        showToast("Fullscreen not supported in this app");
+      });
     }
-    if (watchPlayer?.requestFullscreen) {
-      await watchPlayer.requestFullscreen();
-      return true;
+    if (p) return;
+  } catch {
+    // fallthrough
+  }
+
+  try {
+    if (vid && typeof vid.webkitEnterFullscreen === "function") {
+      vid.webkitEnterFullscreen();
+      return;
     }
-    return false;
-  };
+  } catch {}
 
-  Promise.resolve()
-    .then(async () => {
-      try {
-        const ok = await request();
-        if (ok) {
-          await lockLandscapeIfSupported();
-          return;
-        }
-      } catch {}
-
-      try {
-        if (vid && typeof vid.webkitEnterFullscreen === "function") {
-          vid.webkitEnterFullscreen();
-          return;
-        }
-      } catch {}
-
-      showToast("Fullscreen not supported in this app");
-    })
-    .catch(() => {
-      showToast("Fullscreen not supported in this app");
-    });
+  showToast("Fullscreen not supported in this app");
 }
 
 function setActivePage(page) {
