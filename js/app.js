@@ -1029,9 +1029,7 @@ function renderLocalList(container, emptyEl, ids, options) {
     if (!video.durationSeconds) {
       duration.hidden = true;
     }
-    if (video.thumb) {
-      thumb.style.backgroundImage = `url('${video.thumb}')`;
-    }
+    setCardThumb(thumb, video.thumb, video.id);
     hydrateAvatar(avatar, {
       name: video.channel,
       picture: video.picture,
@@ -1812,8 +1810,13 @@ if (channelBackBtn) {
         return;
       } catch {}
     }
+
+    // If we entered a channel via a hash navigation that did not go through our
+    // history helpers, history.state may not include our appIndex. In that case,
+    // prefer the computed channel entry hash (e.g. #library) to mimic browser back.
+    const target = channelEntryHash && channelEntryHash !== "#home" ? channelEntryHash : "#home";
     mainNavHasHomeBase = true;
-    navReplace("#home");
+    navReplace(target);
   });
 }
 
@@ -3430,9 +3433,7 @@ function showChannel(pubkey) {
       if (!video.durationSeconds) {
         duration.hidden = true;
       }
-      if (video.thumb) {
-        thumb.style.backgroundImage = `url('${video.thumb}')`;
-      }
+      setCardThumb(thumb, video.thumb, video.id);
       hydrateAvatar(avatar, {
         name: video.channel,
         picture: video.picture,
@@ -3740,6 +3741,86 @@ function shortenKey(key) {
   return `${key.slice(0, 8)}…`;
 }
 
+function normalizeThumbUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("http://")) return `https://${raw.slice(7)}`;
+  return raw;
+}
+
+function isLikelyImageThumb(url) {
+  const value = String(url || "").trim();
+  if (!value) return false;
+  if (/^data:image\//i.test(value)) return true;
+  if (/^(https?:|ipfs:)/i.test(value)) {
+    const lower = value.toLowerCase();
+    return /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(lower);
+  }
+  return false;
+}
+
+function hashSeedToIndex(seed, modulo) {
+  const value = String(seed || "");
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return modulo > 0 ? hash % modulo : 0;
+}
+
+function applyThumbVariant(thumbEl, seed) {
+  if (!thumbEl) return;
+  const variants = [
+    "",
+    "alt",
+    "alt-2",
+    "alt-3",
+    "alt-4",
+    "alt-5",
+    "alt-6",
+    "alt-7",
+    "alt-8",
+    "alt-9",
+    "alt-10",
+    "alt-11",
+    "alt-12",
+    "alt-13",
+    "alt-14",
+  ];
+  thumbEl.classList.remove(
+    "alt",
+    "alt-2",
+    "alt-3",
+    "alt-4",
+    "alt-5",
+    "alt-6",
+    "alt-7",
+    "alt-8",
+    "alt-9",
+    "alt-10",
+    "alt-11",
+    "alt-12",
+    "alt-13",
+    "alt-14"
+  );
+  const idx = hashSeedToIndex(seed, variants.length);
+  const cls = variants[idx];
+  if (cls) thumbEl.classList.add(cls);
+}
+
+function setCardThumb(thumbEl, url, seed) {
+  if (!thumbEl) return;
+  const normalized = normalizeThumbUrl(url);
+  const safeUrl = isLikelyImageThumb(normalized) ? normalized : "";
+  if (safeUrl) {
+    thumbEl.style.backgroundImage = `url('${safeUrl}')`;
+    applyThumbVariant(thumbEl, "");
+    return;
+  }
+  thumbEl.style.backgroundImage = "";
+  applyThumbVariant(thumbEl, seed || normalized);
+}
+
 function parseVideoEvent(event) {
   const tags = event.tags || [];
   const content = event.content || "";
@@ -4021,9 +4102,7 @@ function renderVideos(container, emptyState, events, profiles) {
       duration.hidden = true;
     }
 
-    if (video.thumb) {
-      thumb.style.backgroundImage = `url('${video.thumb}')`;
-    }
+    setCardThumb(thumb, video.thumb, video.id);
 
     if (event.kind === 21 && event.tags?.some((tag) => tag[0] === "live")) {
       live.hidden = false;
@@ -4073,9 +4152,7 @@ function renderShorts(container, emptyState, events, profiles) {
     storeVideo(video, profile);
     title.textContent = video.title;
     meta.textContent = profile?.name || "Nostr creator";
-    if (video.thumb) {
-      thumb.style.backgroundImage = `url('${video.thumb}')`;
-    }
+    setCardThumb(thumb, video.thumb, video.id);
     card.dataset.videoUrl = video.url || "";
     card.dataset.videoMime = video.mime || "";
     card.dataset.videoId = video.id;
@@ -4285,9 +4362,7 @@ function buildWatchList(activeId) {
       const channel = clone.querySelector(".watch-item-channel");
       title.textContent = video.title || "NosTube video";
       channel.textContent = video.channel || "Nostr creator";
-      if (video.thumb) {
-        thumb.style.backgroundImage = `url('${video.thumb}')`;
-      }
+      setCardThumb(thumb, video.thumb, video.id);
       item.dataset.videoId = video.id || "";
       item.dataset.videoTitle = video.title || "";
       item.dataset.videoChannel = video.channel || "";
@@ -4511,7 +4586,15 @@ if (menuYourChannel) {
       openAuthModal("chooser");
       return;
     }
-    navigateFromWatchTo(`#channel/${authState.pubkey}`);
+
+    // Ensure channel navigation participates in our in-app history stack.
+    // Only replace from watch (non-mini) to keep watch ephemeral.
+    const route = getRoute();
+    if (route.page === "watch" && !isMini) {
+      navigateFromWatchTo(`#channel/${authState.pubkey}`);
+      return;
+    }
+    navToDeep(`#channel/${authState.pubkey}`);
   });
 }
 

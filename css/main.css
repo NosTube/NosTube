@@ -359,6 +359,7 @@ body.is-search-topbar #search-more-anchor {
 .avatar {
   width: 32px;
   height: 32px;
+  flex: 0 0 auto;
   border-radius: 50%;
   background: #0f0f0f;
   color: #fff;
@@ -1019,7 +1020,7 @@ body.is-search-topbar #search-more-anchor {
 .thumbnail {
   position: relative;
   border-radius: 16px;
-  background: linear-gradient(135deg, #f6c36f, #ef5da8);
+  background: linear-gradient(135deg, #f97316, #ec4899);
   padding-top: 56.25%;
   overflow: hidden;
   box-shadow: var(--yt-shadow);
@@ -1036,47 +1037,59 @@ body.is-search-topbar #search-more-anchor {
 }
 
 .thumbnail.alt {
-  background: linear-gradient(135deg, #7ac7ff, #4263eb);
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
 }
 
 .thumbnail.alt-2 {
-  background: linear-gradient(135deg, #7ef29d, #2f9e44);
+  background: linear-gradient(135deg, #4ade80, #16a34a);
 }
 
 .thumbnail.alt-3 {
-  background: linear-gradient(135deg, #d3b6ff, #845ef7);
+  background: linear-gradient(135deg, #a78bfa, #6366f1);
 }
 
 .thumbnail.alt-4 {
-  background: linear-gradient(135deg, #ffd6a5, #ff7b00);
+  background: linear-gradient(135deg, #fcd34d, #f97316);
 }
 
 .thumbnail.alt-5 {
-  background: linear-gradient(135deg, #f1f3f5, #adb5bd);
+  background: linear-gradient(135deg, #818cf8, #22d3ee);
 }
 
 .thumbnail.alt-6 {
-  background: linear-gradient(135deg, #ffc9de, #ff6b6b);
+  background: linear-gradient(135deg, #fb7185, #db2777);
 }
 
 .thumbnail.alt-7 {
-  background: linear-gradient(135deg, #dee2ff, #5c7cfa);
+  background: linear-gradient(135deg, #34d399, #0d9488);
 }
 
 .thumbnail.alt-8 {
-  background: linear-gradient(135deg, #ffe3e3, #f03e3e);
+  background: linear-gradient(135deg, #f472b6, #ec4899);
 }
 
 .thumbnail.alt-9 {
-  background: linear-gradient(135deg, #b2f2bb, #2b8a3e);
+  background: linear-gradient(135deg, #a3e635, #65a30d);
 }
 
 .thumbnail.alt-10 {
-  background: linear-gradient(135deg, #ffd8a8, #ff922b);
+  background: linear-gradient(135deg, #60a5fa, #2563eb);
 }
 
 .thumbnail.alt-11 {
-  background: linear-gradient(135deg, #d0ebff, #339af0);
+  background: linear-gradient(135deg, #facc15, #f97316);
+}
+
+.thumbnail.alt-12 {
+  background: linear-gradient(135deg, #f87171, #b91c1c);
+}
+
+.thumbnail.alt-13 {
+  background: linear-gradient(135deg, #c084fc, #7e22ce);
+}
+
+.thumbnail.alt-14 {
+  background: linear-gradient(135deg, #fde68a, #f59e0b);
 }
 
 .duration {
@@ -1113,6 +1126,7 @@ body.is-search-topbar #search-more-anchor {
 .channel-avatar {
   width: 36px;
   height: 36px;
+  flex: 0 0 auto;
   border-radius: 50%;
   background: #1a73e8;
   color: #fff;
@@ -1551,6 +1565,7 @@ body.is-search-topbar #search-more-anchor {
 .mobile-nav {
   display: none;
   position: sticky;
+  z-index: 1;
   bottom: 0;
   background: #fff;
   border-top: 1px solid var(--yt-border);
@@ -1741,6 +1756,10 @@ body.is-docking .mini-player {
   outline-offset: 2px;
 }
 
+.watch-control-btn .material-symbols-rounded {
+    font-variation-settings: "FILL" 1, "wght" var(--ms-wght), "GRAD" var(--ms-grad), "opsz" var(--ms-opsz);
+}
+
 #watch-volume {
   width: 120px;
   accent-color: #fff;
@@ -1779,7 +1798,8 @@ body.is-docking .mini-player {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
+    height: 32px;
+    padding: 8px 16px;
     border-radius: 999px;
     background: #f2f2f2;
     font-size: 14px;
@@ -1787,7 +1807,10 @@ body.is-docking .mini-player {
 }
 
 .watch-action .material-symbols-rounded {
-    font-size: 20px;
+    font-size: 18px;
+    font-variation-settings: "FILL" 1, "wght" var(--ms-wght), "GRAD" var(--ms-grad), "opsz" var(--ms-opsz);
+    height: 18px;
+    width: 18px;
 }
 
 .watch-channel {
@@ -1875,6 +1898,7 @@ body.is-docking .mini-player {
 .channel-avatar.large {
   width: 72px;
   height: 72px;
+  flex: 0 0 auto;
   font-size: 20px;
 }
 
@@ -2307,6 +2331,9 @@ body.sidebar-collapsed .sidebar-link {
 
   .video-meta {
     padding: 0 12px;
+  }
+  .feed-row .video-meta {
+    padding: 0;
   }
 
   body.is-watch .topbar {
