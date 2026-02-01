@@ -9,6 +9,11 @@
   --yt-chip-active: #0f0f0f;
   --yt-red: #ff0033;
   --yt-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  --ms-fill: 0;
+  --ms-wght: 300;
+  --ms-grad: 0;
+  --ms-opsz: 24;
 }
 
 body.is-search-overlay-open {
@@ -262,11 +267,13 @@ body.is-search-topbar #search-more-anchor {
   background: var(--yt-red);
   display: grid;
   place-items: center;
+  align-content: center;
   color: #fff;
 }
 
 .brand-icon .material-symbols-rounded {
-  font-size: 18px;
+    font-size: 18px;
+    font-variation-settings: "FILL" 1, "wght" var(--ms-wght), "GRAD" var(--ms-grad), "opsz" var(--ms-opsz);
 }
 
 .brand-text {
@@ -1211,6 +1218,12 @@ body.is-search-topbar #search-more-anchor {
   color: #6b7280;
   display: inline-flex;
   align-items: center;
+}
+.material-symbols-rounded.verified {
+    font-size: 14px;
+    font-variation-settings: 'FILL' 1, 'wght' var(--ms-wght), 'GRAD' 200, 'opsz' 24;
+    height: 14px;
+    width: 14px;
 }
 
 .avatar-img {
@@ -2484,6 +2497,8 @@ body.sidebar-collapsed .sidebar-link {
   font-weight: normal;
   font-style: normal;
   font-size: 24px;
+  font-variation-settings: "FILL" var(--ms-fill), "wght" var(--ms-wght), "GRAD" var(--ms-grad),
+    "opsz" var(--ms-opsz);
   line-height: 1;
   letter-spacing: normal;
   text-transform: none;
@@ -2493,6 +2508,13 @@ body.sidebar-collapsed .sidebar-link {
   white-space: nowrap;
   word-wrap: normal;
   direction: ltr;
+  height: 24px;
+  width: 24px;
   font-feature-settings: "liga";
   -webkit-font-smoothing: antialiased;
+}
+
+.sidebar-link.is-active .material-symbols-rounded,
+.mobile-link.is-active .material-symbols-rounded {
+  --ms-fill: 1;
 }
