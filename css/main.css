@@ -1632,6 +1632,42 @@ body.is-docking .mini-player {
   aspect-ratio: var(--watch-aspect, 16 / 9);
 }
 
+body.is-sim-fullscreen {
+  overflow: hidden;
+}
+
+body.is-sim-fullscreen .topbar,
+body.is-sim-fullscreen .mobile-nav,
+body.is-sim-fullscreen .sidebar,
+body.is-sim-fullscreen .watch-meta,
+body.is-sim-fullscreen .watch-list {
+  display: none;
+}
+
+body.is-sim-fullscreen .watch-layout {
+  padding: 0;
+  gap: 0;
+  grid-template-columns: 1fr;
+}
+
+body.is-sim-fullscreen .watch-main {
+  padding-right: 0;
+}
+
+body.is-sim-fullscreen .watch-player {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  z-index: 9999;
+  aspect-ratio: auto;
+}
+
+body.is-sim-fullscreen #watch-video {
+  object-fit: contain;
+}
+
 @supports not (aspect-ratio: 16 / 9) {
   .watch-player::before {
     content: "";
