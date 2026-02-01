@@ -191,7 +191,6 @@ let miniResumeTime = 0;
 let miniWasPlaying = false;
 let miniResumeVideoId = "";
 let suppressWatchAutoplayOnce = false;
-let fullscreenOrientationLocked = false;
 let mainNavHasHomeBase = false;
 let homeResetInProgress = false;
 let homeResetGuardTimer = 0;
@@ -2425,118 +2424,12 @@ function toggleMute() {
   setVolumeState();
 }
 
-function shouldLockLandscapeOnFullscreen() {
-  if (!isMobileUi()) return false;
-  if (!watchVideo) return false;
-  const w = Number(watchVideo.videoWidth) || 0;
-  const h = Number(watchVideo.videoHeight) || 0;
-  if (!w || !h) return false;
-  return w / h > 1;
-}
-
-async function lockLandscapeIfSupported() {
-  if (!shouldLockLandscapeOnFullscreen()) return;
-  const orientation = window.screen?.orientation;
-  if (!orientation || typeof orientation.lock !== "function") return;
-  try {
-    await orientation.lock("landscape");
-    fullscreenOrientationLocked = true;
-  } catch {}
-}
-
-function unlockOrientationIfSupported() {
-  if (!fullscreenOrientationLocked) return;
-  fullscreenOrientationLocked = false;
-  const orientation = window.screen?.orientation;
-  if (!orientation || typeof orientation.unlock !== "function") return;
-  try {
-    orientation.unlock();
-  } catch {}
-}
-
-async function exitFullscreenIfNeeded() {
-  if (!document.fullscreenElement) return;
-  const done = new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      try {
-        document.removeEventListener("fullscreenchange", onChange);
-      } catch {}
-      resolve();
-    };
-    const onChange = () => {
-      if (!document.fullscreenElement) finish();
-    };
-    document.addEventListener("fullscreenchange", onChange);
-    setTimeout(finish, 800);
-  });
-  try {
-    document.exitFullscreen?.();
-  } catch {}
-  await done;
-}
-
 function toggleFullscreen() {
   if (!watchPlayer) return;
-  const fsEl = document.fullscreenElement;
-
-  if (fsEl) {
-    try {
-      document.exitFullscreen?.();
-      return;
-    } catch {}
-  }
-
-  const vid = watchVideo;
-
-  // IMPORTANT: on Android WebView, fullscreen often requires a *direct* user
-  // gesture. Avoid any async hop before calling requestFullscreen().
-  let attempted = false;
-  let rejected = false;
-  const scheduleToastIfStillNotFullscreen = () => {
-    // Some WebViews reject requestFullscreen() even though fullscreen works on a
-    // different element. Only toast if we truly didn't enter fullscreen.
-    setTimeout(() => {
-      if (!document.fullscreenElement && rejected) {
-        showToast("Fullscreen not supported in this app");
-      }
-    }, 500);
-  };
-
-  const tryRequest = (fn) => {
-    if (typeof fn !== "function") return false;
-    attempted = true;
-    try {
-      const p = fn();
-      if (p && typeof p.catch === "function") {
-        p.catch(() => {
-          rejected = true;
-          scheduleToastIfStillNotFullscreen();
-        });
-      }
-      return true;
-    } catch {
-      rejected = true;
-      scheduleToastIfStillNotFullscreen();
-      return true;
-    }
-  };
-
-  // Prefer the original working path first.
-  if (tryRequest(watchPlayer?.requestFullscreen?.bind(watchPlayer))) return;
-  if (tryRequest(vid?.requestFullscreen?.bind(vid))) return;
-
-  try {
-    if (vid && typeof vid.webkitEnterFullscreen === "function") {
-      vid.webkitEnterFullscreen();
-      return;
-    }
-  } catch {}
-
-  if (!attempted) {
-    showToast("Fullscreen not supported in this app");
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  } else {
+    watchPlayer.requestFullscreen?.();
   }
 }
 
@@ -3101,21 +2994,6 @@ function setMiniVisible(visible) {
 }
 
 function enableMiniPlayerUi() {
-  // Some flows minimize the player without calling enterMiniPlayer() (e.g.
-  // leaving watch while playing). If fullscreen is active, exit it first.
-  if (isMobileUi() && document.fullscreenElement) {
-    if (!enableMiniPlayerUi._fsExitPending) {
-      enableMiniPlayerUi._fsExitPending = true;
-      exitFullscreenIfNeeded()
-        .catch(() => {})
-        .finally(() => {
-          enableMiniPlayerUi._fsExitPending = false;
-          enableMiniPlayerUi();
-        });
-    }
-    return;
-  }
-
   if (isMini) return;
   isMini = true;
   document.body.classList.add("is-mini");
@@ -3145,23 +3023,6 @@ function enableMiniPlayerUi() {
 }
 
 function enterMiniPlayer() {
-  // If we're currently fullscreen (common on mobile), exit fullscreen first.
-  // This avoids a broken mixed state where fullscreen + mini docking conflict.
-  if (isMobileUi && typeof isMobileUi === "function") {
-    if (isMobileUi() && document.fullscreenElement) {
-      if (!enterMiniPlayer._fsExitPending) {
-        enterMiniPlayer._fsExitPending = true;
-        exitFullscreenIfNeeded()
-          .catch(() => {})
-          .finally(() => {
-            enterMiniPlayer._fsExitPending = false;
-            enterMiniPlayer();
-          });
-      }
-      return;
-    }
-  }
-
   if (isMini) return;
   isMini = true;
   document.body.classList.add("is-mini");
@@ -5143,29 +5004,11 @@ document.addEventListener("fullscreenchange", () => {
   if (watchFullscreenIcon) {
     watchFullscreenIcon.textContent = document.fullscreenElement ? "fullscreen_exit" : "fullscreen";
   }
-
-  if (document.fullscreenElement) {
-    void lockLandscapeIfSupported();
-  } else {
-    unlockOrientationIfSupported();
-  }
 });
 
 if (watchVideo) {
   watchVideo.addEventListener("loadedmetadata", () => {
     updateWatchProgress();
-  });
-  watchVideo.addEventListener("webkitbeginfullscreen", () => {
-    if (watchFullscreenIcon) {
-      watchFullscreenIcon.textContent = "fullscreen_exit";
-    }
-    void lockLandscapeIfSupported();
-  });
-  watchVideo.addEventListener("webkitendfullscreen", () => {
-    if (watchFullscreenIcon) {
-      watchFullscreenIcon.textContent = "fullscreen";
-    }
-    unlockOrientationIfSupported();
   });
   watchVideo.addEventListener("timeupdate", updateWatchProgress);
   watchVideo.addEventListener("durationchange", updateWatchProgress);
