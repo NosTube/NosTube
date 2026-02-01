@@ -2493,21 +2493,40 @@ function toggleFullscreen() {
 
   // IMPORTANT: on Android WebView, fullscreen often requires a *direct* user
   // gesture. Avoid any async hop before calling requestFullscreen().
-  try {
-    const p = vid?.requestFullscreen
-      ? vid.requestFullscreen()
-      : watchPlayer?.requestFullscreen
-        ? watchPlayer.requestFullscreen()
-        : null;
-    if (p && typeof p.catch === "function") {
-      p.catch(() => {
+  let attempted = false;
+  let rejected = false;
+  const scheduleToastIfStillNotFullscreen = () => {
+    // Some WebViews reject requestFullscreen() even though fullscreen works on a
+    // different element. Only toast if we truly didn't enter fullscreen.
+    setTimeout(() => {
+      if (!document.fullscreenElement && rejected) {
         showToast("Fullscreen not supported in this app");
-      });
+      }
+    }, 500);
+  };
+
+  const tryRequest = (fn) => {
+    if (typeof fn !== "function") return false;
+    attempted = true;
+    try {
+      const p = fn();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          rejected = true;
+          scheduleToastIfStillNotFullscreen();
+        });
+      }
+      return true;
+    } catch {
+      rejected = true;
+      scheduleToastIfStillNotFullscreen();
+      return true;
     }
-    if (p) return;
-  } catch {
-    // fallthrough
-  }
+  };
+
+  // Prefer the original working path first.
+  if (tryRequest(watchPlayer?.requestFullscreen?.bind(watchPlayer))) return;
+  if (tryRequest(vid?.requestFullscreen?.bind(vid))) return;
 
   try {
     if (vid && typeof vid.webkitEnterFullscreen === "function") {
@@ -2516,7 +2535,9 @@ function toggleFullscreen() {
     }
   } catch {}
 
-  showToast("Fullscreen not supported in this app");
+  if (!attempted) {
+    showToast("Fullscreen not supported in this app");
+  }
 }
 
 function setActivePage(page) {
