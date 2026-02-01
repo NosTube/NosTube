@@ -18,6 +18,7 @@
         <button class="icon-btn" id="channel-back" aria-label="Back" hidden>
           <span class="material-symbols-rounded">arrow_back</span>
         </button>
+        <div class="topbar-title" id="topbar-title" hidden></div>
         <button class="icon-btn" id="menu-toggle" aria-label="Toggle menu">
           <span class="material-symbols-rounded">menu</span>
         </button>
@@ -183,7 +184,6 @@
           </div>
 
           <section class="feed-section">
-            <h2 class="feed-title">Recommended</h2>
             <div class="feed" id="feed-recommended"></div>
             <div class="feed-empty" id="feed-recommended-empty">Loading videos from Nostr relays…</div>
           </section>
@@ -193,7 +193,7 @@
               <span class="material-symbols-rounded">bolt</span>
               <h2>Shorts</h2>
             </div>
-            <div class="shorts-grid" id="shorts-grid"></div>
+            <div class="feed feed-row shorts-row" id="shorts-grid"></div>
             <div class="feed-empty" id="shorts-empty">Loading shorts…</div>
           </section>
 
@@ -215,29 +215,56 @@
 
         <section class="page" id="page-subs">
           <section class="feed-section">
-            <h2 class="feed-title">Subscriptions</h2>
+            <h2 class="feed-title">Latest</h2>
             <div class="feed" id="feed-subs"></div>
             <div class="feed-empty" id="feed-subs-empty">Loading subscriptions…</div>
           </section>
         </section>
 
         <section class="page" id="page-library">
-          <section class="feed-section">
-            <h2 class="feed-title">Library</h2>
-            <div class="feed-empty">
-              Your saved videos live here.
-              <a href="#history">History</a>
-              ·
-              <a href="#watchlater">Watch later</a>
-              ·
-              <a href="#liked">Liked videos</a>
+          <div class="channel-header library-header">
+            <div class="channel-avatar large" id="library-avatar">
+              <span class="channel-initials" id="library-initials">NT</span>
+              <img class="avatar-img" id="library-image" alt="" loading="lazy" />
+            </div>
+            <div>
+              <h1 class="channel-title" id="library-title">Library</h1>
+              <div class="channel-meta" id="library-meta"></div>
+            </div>
+          </div>
+
+          <section class="library-section" aria-label="History">
+            <div class="library-section-header">
+              <h3 class="library-section-title">History</h3>
+              <a class="library-view-all" href="#history">View all</a>
+            </div>
+            <div class="feed feed-row" id="feed-library-history"></div>
+            <div class="feed-empty" id="feed-library-history-empty">Nothing watched yet.</div>
+          </section>
+
+          <section class="library-section" aria-label="Playlists">
+            <div class="library-section-header">
+              <h3 class="library-section-title">Playlists</h3>
+            </div>
+            <div class="feed feed-row library-playlists">
+              <a class="library-playlist" href="#liked">
+                <div class="library-playlist-thumb">
+                  <span class="material-symbols-rounded">thumb_up</span>
+                </div>
+                <div class="library-playlist-title">Liked videos</div>
+              </a>
+              <a class="library-playlist" href="#watchlater">
+                <div class="library-playlist-thumb">
+                  <span class="material-symbols-rounded">schedule</span>
+                </div>
+                <div class="library-playlist-title">Watch later</div>
+              </a>
             </div>
           </section>
         </section>
 
         <section class="page" id="page-history">
           <section class="feed-section">
-            <h2 class="feed-title">History</h2>
             <div class="feed" id="feed-history"></div>
             <div class="feed-empty" id="feed-history-empty">Nothing watched yet.</div>
           </section>
@@ -245,7 +272,6 @@
 
         <section class="page" id="page-watchlater">
           <section class="feed-section">
-            <h2 class="feed-title">Watch later</h2>
             <div class="feed" id="feed-watchlater"></div>
             <div class="feed-empty" id="feed-watchlater-empty">No videos saved yet.</div>
           </section>
@@ -253,7 +279,6 @@
 
         <section class="page" id="page-liked">
           <section class="feed-section">
-            <h2 class="feed-title">Liked videos</h2>
             <div class="feed" id="feed-liked"></div>
             <div class="feed-empty" id="feed-liked-empty">No liked videos yet.</div>
           </section>

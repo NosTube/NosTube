@@ -126,6 +126,8 @@ const watchCommentsNote = document.getElementById("watch-comments-note");
 const sidebarSubsList = document.getElementById("sidebar-subs-list");
 const sidebarSubsEmpty = document.getElementById("sidebar-subs-empty");
 const toastEl = document.getElementById("toast");
+const libraryHistoryFeed = document.getElementById("feed-library-history");
+const libraryHistoryEmpty = document.getElementById("feed-library-history-empty");
 const channelSubscribeBtn = document.getElementById("channel-subscribe");
 const channelEditBtn = document.getElementById("channel-edit");
 const watchShareAnchor = document.getElementById("watch-share-anchor");
@@ -133,12 +135,18 @@ const watchShareBtn = document.getElementById("watch-share");
 const watchShareMenu = document.getElementById("watch-share-menu");
 const watchShareLink = document.getElementById("watch-share-link");
 const watchShareEmbed = document.getElementById("watch-share-embed");
+const libraryAvatar = document.getElementById("library-avatar");
+const libraryInitials = document.getElementById("library-initials");
+const libraryImage = document.getElementById("library-image");
+const libraryTitle = document.getElementById("library-title");
+const libraryMeta = document.getElementById("library-meta");
 
 const searchBackBtn = document.getElementById("search-back");
 const searchTitle = document.getElementById("search-title");
 const searchMeta = document.getElementById("search-meta");
 const searchFeed = document.getElementById("feed-search");
 const searchEmpty = document.getElementById("feed-search-empty");
+const topbarTitle = document.getElementById("topbar-title");
 
 const subsFeed = document.getElementById("feed-subs");
 const subsEmpty = document.getElementById("feed-subs-empty");
@@ -184,10 +192,62 @@ let homeResetInProgress = false;
 let homeResetGuardTimer = 0;
 let pendingMainAfterHomeReset = "";
 
+const APP_SESSION_ID_KEY = "nostube-app-session-id";
+let appSessionId = "";
+
+function getOrCreateAppSessionId() {
+  if (appSessionId) return appSessionId;
+  try {
+    const existing = window.sessionStorage.getItem(APP_SESSION_ID_KEY);
+    if (existing) {
+      appSessionId = existing;
+      return appSessionId;
+    }
+  } catch {}
+  const next = `ns-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  appSessionId = next;
+  try {
+    window.sessionStorage.setItem(APP_SESSION_ID_KEY, next);
+  } catch {}
+  return appSessionId;
+}
+
+function getAppIndexFromState(state) {
+  const sid = getOrCreateAppSessionId();
+  if (!state || state.nostubeSessionId !== sid) return 0;
+  const n = Number(state.appIndex);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function getCurrentAppIndex() {
+  return getAppIndexFromState(history.state || null);
+}
+
+function ensureSessionStateForCurrentEntry() {
+  const sid = getOrCreateAppSessionId();
+  const current = history.state || {};
+  if (current.nostubeSessionId === sid && typeof current.appIndex === "number") return;
+  const next = {
+    ...current,
+    nostubeSessionId: sid,
+    appIndex: getAppIndexFromState(current),
+  };
+  try {
+    history.replaceState(next, "", window.location.hash || "#home");
+  } catch {}
+}
+
 function navReplace(nextHash) {
   const target = String(nextHash || "") || "#home";
   try {
-    history.replaceState(history.state || {}, "", target);
+    const sid = getOrCreateAppSessionId();
+    const current = history.state || {};
+    const next = {
+      ...current,
+      nostubeSessionId: sid,
+      appIndex: getAppIndexFromState(current),
+    };
+    history.replaceState(next, "", target);
   } catch {
     window.location.hash = target;
     return;
@@ -197,10 +257,27 @@ function navReplace(nextHash) {
   } catch {}
 }
 
+function navToDeep(nextHash) {
+  const target = String(nextHash || "") || "#home";
+  const route = getRoute();
+  if (route.page === "watch" && !isMini) {
+    navigateFromWatchTo(target);
+    return;
+  }
+  navPush(target);
+}
+
 function navPush(nextHash) {
   const target = String(nextHash || "") || "#home";
   try {
-    history.pushState(history.state || {}, "", target);
+    const sid = getOrCreateAppSessionId();
+    const current = history.state || {};
+    const next = {
+      ...current,
+      nostubeSessionId: sid,
+      appIndex: getAppIndexFromState(current) + 1,
+    };
+    history.pushState(next, "", target);
   } catch {
     window.location.hash = target;
     return;
@@ -208,6 +285,28 @@ function navPush(nextHash) {
   try {
     handleRoute();
   } catch {}
+}
+
+function navResetToHome({ thenPush = "" } = {}) {
+  const target = "#home";
+  const idx = getCurrentAppIndex();
+  if (idx > 0) {
+    homeResetInProgress = true;
+    pendingMainAfterHomeReset = String(thenPush || "") || "";
+    try {
+      history.go(-idx);
+      return;
+    } catch {}
+    homeResetInProgress = false;
+    pendingMainAfterHomeReset = "";
+  }
+  navReplace(target);
+  mainNavHasHomeBase = true;
+  if (thenPush) {
+    try {
+      navPush(thenPush);
+    } catch {}
+  }
 }
 
 function navToMain(key) {
@@ -222,6 +321,20 @@ function navToMain(key) {
   const currentHash = window.location.hash || "#home";
   if (target === currentHash) return;
 
+  // First main-tab interaction in this tab/session establishes our in-app root.
+  // If we started on a deep URL (e.g. #watch/...), we must replace that *root*
+  // entry with #home (not merely replace the current entry), so Back from Home
+  // exits the app instead of returning to the initial deep URL.
+  if (!mainNavHasHomeBase) {
+    mainNavHasHomeBase = true;
+    if (target === "#home") {
+      navResetToHome();
+    } else {
+      navResetToHome({ thenPush: target });
+    }
+    return;
+  }
+
   if (target === "#home") {
     const route = getRoute();
     if (route.page === "watch" && !isMini) {
@@ -229,63 +342,7 @@ function navToMain(key) {
       mainNavHasHomeBase = true;
       return;
     }
-
-    const currentHash = window.location.hash || "#home";
-    const currentIsMain =
-      currentHash === "#home" ||
-      currentHash === "#shorts" ||
-      currentHash === "#subs" ||
-      currentHash === "#library";
-    if (currentIsMain && currentHash !== "#home" && mainNavHasHomeBase) {
-      homeResetInProgress = true;
-      pendingMainAfterHomeReset = "";
-      try {
-        if (homeResetGuardTimer) {
-          window.clearTimeout(homeResetGuardTimer);
-        }
-      } catch {}
-      homeResetGuardTimer = window.setTimeout(() => {
-        homeResetInProgress = false;
-        pendingMainAfterHomeReset = "";
-        homeResetGuardTimer = 0;
-        try {
-          navReplace("#home");
-        } catch {}
-      }, 1600);
-      try {
-        history.back();
-        return;
-      } catch {}
-      homeResetInProgress = false;
-    }
-
-    const isDeepPage =
-      route.page &&
-      route.page !== "home" &&
-      route.page !== "shorts" &&
-      route.page !== "subs" &&
-      route.page !== "library";
-    if (isDeepPage && mainNavHasHomeBase) {
-      homeResetInProgress = true;
-      try {
-        if (homeResetGuardTimer) {
-          window.clearTimeout(homeResetGuardTimer);
-        }
-      } catch {}
-      homeResetGuardTimer = window.setTimeout(() => {
-        homeResetInProgress = false;
-        homeResetGuardTimer = 0;
-        try {
-          navReplace("#home");
-        } catch {}
-      }, 1600);
-      try {
-        history.back();
-        return;
-      } catch {}
-    }
-
-    navReplace(target);
+    navResetToHome();
     mainNavHasHomeBase = true;
     return;
   }
@@ -300,27 +357,8 @@ function navToMain(key) {
   const route = getRoute();
 
   if (route.page && !currentIsMain && mainNavHasHomeBase) {
-    pendingMainAfterHomeReset = target;
-    homeResetInProgress = true;
-    try {
-      if (homeResetGuardTimer) {
-        window.clearTimeout(homeResetGuardTimer);
-      }
-    } catch {}
-    homeResetGuardTimer = window.setTimeout(() => {
-      homeResetInProgress = false;
-      pendingMainAfterHomeReset = "";
-      homeResetGuardTimer = 0;
-      try {
-        navReplace("#home");
-      } catch {}
-    }, 1600);
-    try {
-      history.back();
-      return;
-    } catch {}
-    homeResetInProgress = false;
-    pendingMainAfterHomeReset = "";
+    navResetToHome({ thenPush: target });
+    return;
   }
 
   if (currentHash === "#home") {
@@ -334,34 +372,9 @@ function navToMain(key) {
     return;
   }
 
-  if (route.page === "watch" && !isMini) {
-    try {
-      history.replaceState(history.state || {}, "", "#home");
-      history.pushState(history.state || {}, "", target);
-    } catch {
-      window.location.hash = "#home";
-      window.location.hash = target;
-      return;
-    }
-    mainNavHasHomeBase = true;
-    try {
-      handleRoute();
-    } catch {}
-    return;
-  }
-
-  try {
-    history.replaceState(history.state || {}, "", "#home");
-    history.pushState(history.state || {}, "", target);
-  } catch {
-    window.location.hash = "#home";
-    window.location.hash = target;
-    return;
-  }
-  mainNavHasHomeBase = true;
-  try {
-    handleRoute();
-  } catch {}
+  // Default: treat main tabs as replacing current view once we have a home base.
+  // If we somehow do not yet have a home base, navResetToHome will establish it.
+  navResetToHome({ thenPush: target });
 }
 
 const STORAGE_HISTORY = "nostube-history";
@@ -486,6 +499,7 @@ function syncTopbarMode() {
   const route = getRoute();
   let useChannel = false;
   let useSearch = false;
+  let useDeep = false;
 
   if (mobile && route.page === "channel") {
     useChannel = true;
@@ -503,16 +517,52 @@ function syncTopbarMode() {
     if (underlayDragPage === pageSearch) useSearch = true;
     if (watchTransitionUnderlay === pageSearch) useSearch = true;
     if (topbarUnderlayOverridePage === pageSearch) useSearch = true;
+
+    if (underlayDragPage === pageHistory) useDeep = true;
+    if (watchTransitionUnderlay === pageHistory) useDeep = true;
+    if (topbarUnderlayOverridePage === pageHistory) useDeep = true;
+
+    if (underlayDragPage === pageWatchlater) useDeep = true;
+    if (watchTransitionUnderlay === pageWatchlater) useDeep = true;
+    if (topbarUnderlayOverridePage === pageWatchlater) useDeep = true;
+
+    if (underlayDragPage === pageLiked) useDeep = true;
+    if (watchTransitionUnderlay === pageLiked) useDeep = true;
+    if (topbarUnderlayOverridePage === pageLiked) useDeep = true;
+  }
+
+  if (mobile && (route.page === "history" || route.page === "watchlater" || route.page === "liked")) {
+    useDeep = true;
   }
 
   document.body.classList.toggle("is-channel-topbar", Boolean(useChannel));
   document.body.classList.toggle("is-search-topbar", Boolean(useSearch));
-  const showBack = Boolean(useChannel || useSearch);
+  document.body.classList.toggle("is-deep-topbar", Boolean(useDeep));
+  const showBack = Boolean(useChannel || useSearch || useDeep);
   const showChannelControls = Boolean(useChannel);
   if (channelBackBtn) channelBackBtn.hidden = !showBack;
   if (channelMoreAnchor) channelMoreAnchor.hidden = !showChannelControls;
   if (!showChannelControls) {
     closeMenu(channelMenu);
+  }
+
+  if (topbarTitle) {
+    if (useDeep) {
+      let title = "";
+      if (route.page === "history") title = "History";
+      if (route.page === "watchlater") title = "Watch later";
+      if (route.page === "liked") title = "Liked videos";
+      if (!title) {
+        if (underlayDragPage === pageHistory) title = "History";
+        if (underlayDragPage === pageWatchlater) title = "Watch later";
+        if (underlayDragPage === pageLiked) title = "Liked videos";
+      }
+      topbarTitle.textContent = title || "";
+      topbarTitle.hidden = false;
+    } else {
+      topbarTitle.hidden = true;
+      topbarTitle.textContent = "";
+    }
   }
 }
 
@@ -541,7 +591,12 @@ if (sidebarNavLinks.length) {
   sidebarNavLinks.forEach((link) => {
     link.addEventListener("click", (event) => {
       event.preventDefault();
-      navToMain(link.dataset.nav || "home");
+      const key = link.dataset.nav || "home";
+      if (key === "home" || key === "shorts" || key === "subs" || key === "library") {
+        navToMain(key);
+        return;
+      }
+      navToDeep(`#${key}`);
     });
   });
 }
@@ -817,6 +872,26 @@ function exitMiniPlayerAndStop() {
 
 function renderLocalPages() {
   const signedIn = Boolean(authState.pubkey);
+  if (pageLibrary?.classList.contains("is-active")) {
+    setLibraryHeaderLoading(authState.pubkey);
+    renderLibraryHeader(authState.pubkey);
+    if (signedIn) {
+      ensureProfiles([authState.pubkey])
+        .then(() => renderLibraryHeader(authState.pubkey))
+        .catch(() => {});
+    }
+    if (!signedIn) {
+      gateSignedOut(libraryHistoryFeed, libraryHistoryEmpty, {
+        title: "Your library",
+        subtitle: "Sign in to see your history and playlists.",
+      });
+    } else {
+      renderLocalList(libraryHistoryFeed, libraryHistoryEmpty, readIdList(STORAGE_HISTORY), {
+        empty: "You haven't watched anything yet.",
+        max: 10,
+      });
+    }
+  }
   if (pageHistory?.classList.contains("is-active")) {
     if (!signedIn) {
       gateSignedOut(historyList, historyEmpty, {
@@ -922,10 +997,12 @@ function gateSignedOut(container, emptyEl, options) {
 function renderLocalList(container, emptyEl, ids, options) {
   if (!container || !videoTemplate) return;
   container.innerHTML = "";
+  const max = Number.isFinite(Number(options?.max)) ? Number(options.max) : 200;
   const items = (ids || [])
     .map((id) => videoStore.get(id))
     .filter(Boolean)
-    .slice(0, 60);
+    .slice(0, max)
+    .sort((a, b) => (b.published || 0) - (a.published || 0));
   if (!items.length) {
     if (emptyEl) {
       emptyEl.textContent = options?.empty || "Nothing here yet.";
@@ -1675,6 +1752,44 @@ function closeAllMenus() {
 function positionMenu(menu) {
   if (!menu || menu.hidden) return;
   menu.classList.remove("is-up");
+
+  if (menu === watchShareMenu && watchShareAnchor && window.matchMedia("(max-width: 720px)").matches) {
+    const padding = 12;
+    const gap = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const anchorRect = watchShareAnchor.getBoundingClientRect();
+
+    menu.style.position = "fixed";
+    menu.style.right = "auto";
+
+    const maxWidth = Math.min(320, vw - padding * 2);
+    menu.style.width = `${maxWidth}px`;
+
+    const leftPreferred = anchorRect.left + anchorRect.width / 2 - maxWidth / 2;
+    const left = Math.max(padding, Math.min(vw - padding - maxWidth, leftPreferred));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${Math.min(vh - padding, anchorRect.bottom + gap)}px`;
+    menu.style.bottom = "auto";
+
+    const rect = menu.getBoundingClientRect();
+    if (rect.bottom > vh - padding) {
+      menu.classList.add("is-up");
+      menu.style.top = "auto";
+      menu.style.bottom = `${Math.max(padding, vh - anchorRect.top + gap)}px`;
+    }
+    return;
+  }
+
+  if (menu === watchShareMenu) {
+    menu.style.position = "";
+    menu.style.left = "";
+    menu.style.right = "";
+    menu.style.top = "";
+    menu.style.bottom = "";
+    menu.style.width = "";
+  }
+
   const rect = menu.getBoundingClientRect();
   const padding = 12;
   if (rect.bottom > window.innerHeight - padding) {
@@ -1690,13 +1805,15 @@ function openMenuWithPosition(menu) {
 if (channelBackBtn) {
   channelBackBtn.addEventListener("click", () => {
     closeAllMenus();
-    try {
-      if (history.length > 1) {
+    const idx = getCurrentAppIndex();
+    if (idx > 0) {
+      try {
         history.back();
         return;
-      }
-    } catch {}
-    window.location.hash = "#home";
+      } catch {}
+    }
+    mainNavHasHomeBase = true;
+    navReplace("#home");
   });
 }
 
@@ -2003,6 +2120,43 @@ function setChannelHeaderLoading(pubkey) {
     channelImage.classList.remove("is-loaded");
     channelImage.removeAttribute("src");
   }
+}
+
+function setLibraryHeaderLoading(pubkey) {
+  if (libraryTitle) libraryTitle.textContent = "Your library";
+  if (libraryMeta) libraryMeta.textContent = shortenKey(pubkey) || "nostr profile";
+  if (libraryInitials) libraryInitials.textContent = initialsFromName(pubkey);
+  if (libraryAvatar) libraryAvatar.classList.remove("has-image");
+  if (libraryImage) {
+    libraryImage.classList.remove("is-loaded");
+    libraryImage.removeAttribute("src");
+  }
+}
+
+function renderLibraryHeader(pubkey) {
+  const signedIn = Boolean(pubkey);
+  if (!libraryAvatar || !libraryTitle || !libraryMeta) return;
+
+  if (!signedIn) {
+    libraryTitle.textContent = "Library";
+    libraryMeta.textContent = "";
+    if (libraryInitials) libraryInitials.textContent = "";
+    libraryAvatar.classList.remove("has-image");
+    if (libraryImage) {
+      libraryImage.classList.remove("is-loaded");
+      libraryImage.removeAttribute("src");
+    }
+    return;
+  }
+
+  const profile = profilesCache.get(pubkey) || {};
+  const name = String(profile.name || "").trim();
+  const nip05 = String(profile.nip05 || "").trim();
+
+  libraryTitle.textContent = name || "Your library";
+  libraryMeta.textContent = nip05 || shortenKey(pubkey) || "nostr profile";
+  if (libraryInitials) libraryInitials.textContent = initialsFromName(name || pubkey);
+  hydrateAvatar(libraryAvatar, profile);
 }
 
 function renderChannelHeader(pubkey, token) {
@@ -2796,12 +2950,14 @@ function enterMiniPlayer() {
     scrollRestorePending = { hash: targetHash, y: 0 };
   }
 
-  try {
-    history.back();
-    return;
-  } catch {}
-
-  window.location.hash = targetHash;
+  const idx = getCurrentAppIndex();
+  if (idx > 0) {
+    try {
+      history.go(-1);
+      return;
+    } catch {}
+  }
+  navReplace(targetHash);
 }
 
 function exitMiniPlayer() {
@@ -2827,7 +2983,7 @@ function exitMiniPlayer() {
     resumeWatchOnRoute = true;
     const nextHash = `#watch/${video.id}`;
     try {
-      history.pushState(history.state || {}, "", nextHash);
+      navPush(nextHash);
     } catch {
       window.location.hash = nextHash;
       return;
@@ -3968,6 +4124,7 @@ async function initNostrFeed() {
 }
 
 initNostrFeed();
+ensureSessionStateForCurrentEntry();
 window.addEventListener("hashchange", () => {
   if (homeResetInProgress) return;
   try {
@@ -3976,8 +4133,8 @@ window.addEventListener("hashchange", () => {
 });
 window.addEventListener("popstate", () => {
   if (homeResetInProgress) {
-    const hash = window.location.hash || "#home";
-    if (hash === "#home" || hash === "#") {
+    const idx = getCurrentAppIndex();
+    if (idx === 0) {
       homeResetInProgress = false;
       if (homeResetGuardTimer) {
         try {
@@ -3986,6 +4143,14 @@ window.addEventListener("popstate", () => {
         homeResetGuardTimer = 0;
       }
       mainNavHasHomeBase = true;
+
+      // We may have started the session on a deep URL (e.g. #watch/...). Once we
+      // rewind to the session root, force that root to be #home so Back exits the
+      // app instead of returning to the initial deep URL.
+      try {
+        navReplace("#home");
+      } catch {}
+
       if (pendingMainAfterHomeReset) {
         const next = pendingMainAfterHomeReset;
         pendingMainAfterHomeReset = "";
@@ -3999,6 +4164,8 @@ window.addEventListener("popstate", () => {
       } catch {}
       return;
     }
+
+    // Still within our in-app stack; continue rewinding.
     try {
       history.back();
       return;
@@ -4042,6 +4209,64 @@ window.addEventListener("resize", () => {
   try {
     handleRoute();
   } catch {}
+});
+
+document.addEventListener("click", (event) => {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link) return;
+  if (event.defaultPrevented) return;
+  if (event.button !== 0) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+  // sidebar main links already have a dedicated handler
+  if (link.matches(".sidebar-link[data-nav]")) return;
+
+  const href = link.getAttribute("href") || "";
+  if (!href || href === "#") return;
+
+  event.preventDefault();
+  closeAllMenus();
+
+  // Normalize to a standard hash format.
+  const hash = href.startsWith("#") ? href : `#${href}`;
+
+  if (hash === "#home") {
+    navToMain("home");
+    return;
+  }
+  if (hash === "#shorts") {
+    navToMain("shorts");
+    return;
+  }
+  if (hash === "#subs") {
+    navToMain("subs");
+    return;
+  }
+  if (hash === "#library") {
+    navToMain("library");
+    return;
+  }
+
+  // Deep pages
+  if (hash === "#history" || hash === "#watchlater" || hash === "#liked") {
+    navToDeep(hash);
+    return;
+  }
+  if (/^#channel\//i.test(hash) || /^#search\//i.test(hash)) {
+    navToDeep(hash);
+    return;
+  }
+
+  // Watch routes
+  if (/^#watch\//i.test(hash)) {
+    const current = getRoute();
+    if (current.page === "watch") navReplace(hash);
+    else navPush(hash);
+    return;
+  }
+
+  // Fallback: treat as deep navigation.
+  navToDeep(hash);
 });
 
 restoreAuth().then(updateAuthUi).catch(() => {});
@@ -4088,14 +4313,14 @@ function openWatchFromCard(card) {
     return;
   }
   if (current.page === "watch") {
-    window.location.replace(`#watch/${id}`);
+    navReplace(`#watch/${id}`);
   } else {
     const currentHash = window.location.hash || "#home";
     lastNonWatchHash = currentHash;
     try {
       scrollPositions.set(currentHash, window.scrollY || 0);
     } catch {}
-    window.location.hash = `watch/${id}`;
+    navPush(`#watch/${id}`);
   }
 }
 
@@ -4107,7 +4332,7 @@ function navigateFromWatchTo(nextHash) {
     return;
   }
   try {
-    history.replaceState(history.state || {}, "", target);
+    navReplace(target);
   } catch {
     window.location.hash = target;
     return;
@@ -4145,6 +4370,20 @@ if (watchList) {
     }
   });
 }
+
+function attachCardClick(container) {
+  if (!container) return;
+  container.addEventListener("click", (event) => {
+    const card = event.target.closest(".video-card");
+    if (!card) return;
+    openWatchFromCard(card);
+  });
+}
+
+attachCardClick(historyList);
+attachCardClick(watchlaterList);
+attachCardClick(likedList);
+attachCardClick(libraryHistoryFeed);
 
 if (watchToggle) {
   watchToggle.addEventListener("click", togglePlay);
