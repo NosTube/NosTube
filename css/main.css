@@ -1644,6 +1644,13 @@ body.is-sim-fullscreen .watch-list {
   display: none;
 }
 
+body.is-sim-fullscreen.is-docking .topbar,
+body.is-sim-fullscreen.is-dock-hold .topbar,
+body.is-sim-fullscreen.is-docking .mobile-nav,
+body.is-sim-fullscreen.is-dock-hold .mobile-nav {
+  display: flex;
+}
+
 body.is-sim-fullscreen .watch-layout {
   padding: 0;
   gap: 0;
@@ -1660,8 +1667,35 @@ body.is-sim-fullscreen .watch-player {
   width: 100vw;
   height: 100vh;
   border-radius: 0;
-  z-index: 9999;
+  margin: 0;
   aspect-ratio: auto;
+}
+
+body.is-sim-fullscreen.is-docking .watch-player,
+body.is-sim-fullscreen.is-dock-hold .watch-player {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  background: #000;
+}
+
+body.is-sim-fullscreen.is-docking .page-watch,
+body.is-sim-fullscreen.is-dock-hold .page-watch {
+  overflow: hidden;
+}
+
+body.is-sim-fullscreen.is-docking .page-watch,
+body.is-sim-fullscreen.is-dock-hold .page-watch {
+  background: #000;
+}
+
+body.is-sim-fullscreen.is-docking .watch-meta,
+body.is-sim-fullscreen.is-dock-hold .watch-meta,
+body.is-sim-fullscreen.is-docking .watch-side,
+body.is-sim-fullscreen.is-dock-hold .watch-side {
+  display: none;
 }
 
 body.is-sim-fullscreen #watch-video {
@@ -2440,8 +2474,9 @@ body.sidebar-collapsed .sidebar-link {
     right: 0;
     bottom: 62px;
     height: 56px;
-    background: #111;
-    color: #fff;
+    background: rgb(17 17 17 / 85%);
+    backdrop-filter: blur(16px) saturate(3.5);
+    color: rgb(255 255 255 / 75%);
     display: grid;
     grid-template-columns: 96px 1fr auto;
     align-items: center;

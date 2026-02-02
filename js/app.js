@@ -737,7 +737,7 @@ function syncTopbarMode() {
     useSearch = true;
   }
 
-  if (mobile && route.page === "watch") {
+  if (mobile && (route.page === "watch" || route.page === "fullscreen")) {
     if (underlayDragPage === pageChannel) useChannel = true;
     if (watchTransitionUnderlay === pageChannel) useChannel = true;
     if (topbarUnderlayOverridePage === pageChannel) useChannel = true;
@@ -2802,8 +2802,9 @@ function restoreWindowScrollForHash(hash) {
 function setUnderlayDragVisible(visible) {
   if (!isMobileUi()) return;
   const route = getRoute();
+  const isWatchLike = route.page === "watch" || route.page === "fullscreen";
   const targetHash =
-    visible && route.page === "watch" && !isMini
+    visible && isWatchLike && !isMini
       ? lastNonWatchHash || "#home"
       : miniLastHash || lastNonWatchHash || "#home";
   const next = visible ? getPageForHash(targetHash) : null;
@@ -2820,11 +2821,19 @@ function setUnderlayDragVisible(visible) {
     underlayDragPage.classList.add("is-underlay");
     underlayDragPage.classList.add("is-active");
 
+    topbarUnderlayOverridePage = underlayDragPage;
+    syncTopbarMode();
+
     requestAnimationFrame(() => restoreWindowScrollForHash(targetHash));
   } else {
     underlayDragPage.classList.remove("is-underlay");
     if (underlayDragPage !== pageWatch && underlayDragPage !== currentPage) {
       underlayDragPage.classList.remove("is-active");
+    }
+
+    if (topbarUnderlayOverridePage === underlayDragPage) {
+      topbarUnderlayOverridePage = null;
+      syncTopbarMode();
     }
   }
 }
@@ -2836,10 +2845,14 @@ function startDockHold({ keepUnderlay = false } = {}) {
   if (keepUnderlay) {
     setUnderlayDragVisible(true);
     const route = getRoute();
+    const isWatchLike = route.page === "watch" || route.page === "fullscreen";
     const targetHash =
-      route.page === "watch" && !isMini
+      isWatchLike && !isMini
         ? lastNonWatchHash || "#home"
         : miniLastHash || lastNonWatchHash || "#home";
+
+    topbarUnderlayOverridePage = getPageForHash(targetHash);
+    syncTopbarMode();
     requestAnimationFrame(() => restoreWindowScrollForHash(targetHash));
   }
 
@@ -2847,6 +2860,8 @@ function startDockHold({ keepUnderlay = false } = {}) {
     clearDockHold();
     if (keepUnderlay) {
       setUnderlayDragVisible(false);
+      topbarUnderlayOverridePage = null;
+      syncTopbarMode();
     }
   };
 
@@ -3425,7 +3440,8 @@ function setDockDragDy(nextDy, alphaDy) {
     void alpha;
 
     if (!isMini) {
-      setUnderlayDragVisible(dockDragDy > 0);
+      const keepUnderlay = dockDragDy > 0 || document.body.classList.contains("is-dock-hold");
+      setUnderlayDragVisible(keepUnderlay);
     }
 
     syncTopbarMode();
