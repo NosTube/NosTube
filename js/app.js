@@ -192,6 +192,8 @@ let miniWasPlaying = false;
 let miniResumeVideoId = "";
 let suppressWatchAutoplayOnce = false;
 let pendingMiniAfterFullscreenExit = false;
+let watchLoadedVideoId = "";
+let simFullscreenRotateWanted = false;
 let mainNavHasHomeBase = false;
 let homeResetInProgress = false;
 let homeResetGuardTimer = 0;
@@ -217,6 +219,61 @@ function initAndroidModeFlagFromUrl() {
   }
 }
 
+function isFullscreenRoute(route) {
+  return String(route?.page || "") === "fullscreen";
+}
+
+function getWatchIdForRoute(route) {
+  if (!route) return "";
+  if (route.page === "watch" || route.page === "fullscreen") return String(route.id || "");
+  return "";
+}
+
+function enterAndroidFullscreenRoute(shouldRotate) {
+  if (!isAndroidMode()) {
+    enterSimFullscreen(shouldRotate);
+    return;
+  }
+  const route = getRoute();
+  const id = getWatchIdForRoute(route) || String(lastWatchedVideoId || "");
+  if (!id) {
+    enterSimFullscreen(shouldRotate);
+    return;
+  }
+  simFullscreenRotateWanted = Boolean(shouldRotate);
+  enterSimFullscreen(shouldRotate);
+  if (!isFullscreenRoute(route)) {
+    try {
+      navPush(`#fullscreen/${id}`);
+    } catch {}
+  }
+}
+
+function exitAndroidFullscreenRoute() {
+  if (!isAndroidMode()) {
+    exitSimFullscreen();
+    return;
+  }
+  const route = getRoute();
+  simFullscreenRotateWanted = false;
+  exitSimFullscreen();
+  if (isFullscreenRoute(route)) {
+    const idx = getCurrentAppIndex();
+    if (idx > 0) {
+      try {
+        history.back();
+        return;
+      } catch {}
+    }
+    const id = getWatchIdForRoute(route) || String(lastWatchedVideoId || "");
+    if (id) {
+      try {
+        navReplace(`#watch/${id}`);
+      } catch {}
+    }
+  }
+}
+
 function isAndroidMode() {
   if (isAndroidModeCached == null) initAndroidModeFlagFromUrl();
   return Boolean(isAndroidModeCached);
@@ -231,23 +288,6 @@ function getCurrentVideoAspect() {
   const h = Number.isFinite(watchVideo?.videoHeight) ? watchVideo.videoHeight : 0;
   if (w > 0 && h > 0) return w / h;
   return 0;
-}
-
-function notifyAndroidWrapper(fullscreen, rotate) {
-  if (!isAndroidMode()) return;
-  try {
-    const fs = fullscreen ? "1" : "0";
-    const rot = rotate ? "1" : "0";
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    iframe.src = `nostube://fullscreen?fs=${fs}&rot=${rot}`;
-    document.body.appendChild(iframe);
-    window.setTimeout(() => {
-      try {
-        iframe.remove();
-      } catch {}
-    }, 0);
-  } catch {}
 }
 
 function setAndroidUrlParamState(next) {
@@ -267,17 +307,33 @@ function setAndroidUrlParamState(next) {
   } catch {}
 }
 
+function clearAndroidFullscreenParams() {
+  if (!isAndroidMode()) return;
+  setAndroidUrlParamState({ fullscreen: false, rotate: false });
+}
+
+function syncAndroidFullscreenForRoute(route) {
+  if (!isAndroidMode()) return;
+  const isFs = String(route?.page || "") === "fullscreen";
+  if (isFs) {
+    document.body.classList.add("is-sim-fullscreen");
+    setAndroidUrlParamState({ fullscreen: true, rotate: Boolean(simFullscreenRotateWanted) });
+    if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen_exit";
+  } else {
+    document.body.classList.remove("is-sim-fullscreen");
+    simFullscreenRotateWanted = false;
+    clearAndroidFullscreenParams();
+    if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen";
+  }
+}
+
 function enterSimFullscreen(shouldRotate) {
   document.body.classList.add("is-sim-fullscreen");
-  setAndroidUrlParamState({ fullscreen: true, rotate: Boolean(shouldRotate) });
-  notifyAndroidWrapper(true, Boolean(shouldRotate));
   if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen_exit";
 }
 
 function exitSimFullscreen() {
   document.body.classList.remove("is-sim-fullscreen");
-  setAndroidUrlParamState({ fullscreen: false, rotate: false });
-  notifyAndroidWrapper(false, false);
   if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen";
 }
 
@@ -345,7 +401,7 @@ async function requestMiniPlayer() {
 function requestMiniPlayerGesture() {
   if (isMini) return;
   if (isSimFullscreen()) {
-    exitSimFullscreen();
+    exitAndroidFullscreenRoute();
     enterMiniPlayer();
     return;
   }
@@ -959,7 +1015,7 @@ function setWatchSaveUi() {
 
 function getCurrentWatchVideo() {
   const route = getRoute();
-  if (route.page !== "watch") return null;
+  if (route.page !== "watch" && route.page !== "fullscreen") return null;
   return videoStore.get(route.id) || null;
 }
 
@@ -2598,9 +2654,9 @@ function toggleFullscreen() {
 
   if (isAndroidMode()) {
     if (isSimFullscreen()) {
-      exitSimFullscreen();
+      exitAndroidFullscreenRoute();
     } else {
-      enterSimFullscreen(rotate);
+      enterAndroidFullscreenRoute(rotate);
     }
     return;
   }
@@ -2724,6 +2780,7 @@ function getPageForHash(hash) {
   if (page === "watchlater") return pageWatchlater;
   if (page === "liked") return pageLiked;
   if (page === "search") return pageSearch;
+  if (page === "fullscreen") return pageWatch;
   if (page === "channel") return pageChannel;
   return pageHome;
 }
@@ -3050,6 +3107,7 @@ function storeVideo(video, profile) {
 function showWatchForVideo(video) {
   if (!video) return;
   lastWatchedVideoId = video.id;
+  watchLoadedVideoId = String(video.id || "");
   addToIdList(STORAGE_HISTORY, video.id, 200);
   if (!isMini) {
     miniLastHash = lastNonWatchHash || "#home";
@@ -3770,16 +3828,21 @@ function handleRoute() {
   const prevHash = handleRoute._lastHash || "#home";
   const prevRoute = handleRoute._lastRoute || { page: "" };
   const route = getRoute();
-  const changedPage = route.page !== prevRoute.page;
+  const isWatchLike = (page) => page === "watch" || page === "fullscreen";
+  const changedPage = isWatchLike(route.page)
+    ? !isWatchLike(prevRoute.page)
+    : route.page !== prevRoute.page;
+
+  syncAndroidFullscreenForRoute(route);
 
   if (route.page) {
-    if (route.page !== "watch") {
+    if (!isWatchLike(route.page)) {
       lastNonWatchHash = window.location.hash || "#home";
     }
     if (route.page !== "search") {
       lastNonSearchHash = window.location.hash || "#home";
     }
-    if (isMini && route.page !== "watch") {
+    if (isMini && !isWatchLike(route.page)) {
       try {
         miniLastHash = window.location.hash || miniLastHash || lastNonWatchHash || "#home";
       } catch {}
@@ -3799,7 +3862,7 @@ function handleRoute() {
     }
   }
 
-  if (changedPage && prevRoute.page === "watch" && route.page !== "watch") {
+  if (changedPage && isWatchLike(prevRoute.page) && !isWatchLike(route.page)) {
     if (!isMini) {
       if (suppressMiniOnLeaveWatchOnce) {
         suppressMiniOnLeaveWatchOnce = false;
@@ -3814,7 +3877,7 @@ function handleRoute() {
       }
     }
   }
-  if (changedPage && prevRoute.page !== "watch" && route.page === "watch") {
+  if (changedPage && !isWatchLike(prevRoute.page) && isWatchLike(route.page)) {
     try {
       miniLastHash = lastNonWatchHash || miniLastHash || "#home";
     } catch {}
@@ -3825,7 +3888,7 @@ function handleRoute() {
   handleRoute._lastRoute = route;
   handleRoute._lastHash = window.location.hash || "#home";
 
-  if (isMini && route.page !== "watch") {
+  if (isMini && !isWatchLike(route.page)) {
     miniLastHash = window.location.hash || miniLastHash || "#home";
   }
 
@@ -3865,7 +3928,47 @@ function handleRoute() {
     renderLocalPages();
     return;
   }
+  if (route.page === "fullscreen") {
+    const id = String(route.id || "");
+    if (id) {
+      lastWatchedVideoId = id;
+    }
+    setActivePage(pageWatch);
+    setActiveNav("");
+    updateSubscribeButton();
+    setWatchLikeUi();
+    setWatchSaveUi();
+    if (isAndroidMode() && id && String(watchLoadedVideoId || "") === id) {
+      return;
+    }
+    const current = getCurrentWatchVideo();
+    if (!current || String(current.id || "") !== id) {
+      const video = videoStore.get(id);
+      if (video) {
+        showWatchForVideo(video);
+      } else {
+        ensureWatchVideoLoaded({ page: "watch", id, params: route.params });
+      }
+    }
+    return;
+  }
+
   if (route.page === "watch") {
+    if (
+      isAndroidMode() &&
+      String(prevRoute?.page || "") === "fullscreen" &&
+      String(prevRoute?.id || "") &&
+      String(prevRoute.id || "") === String(route.id || "") &&
+      String(watchLoadedVideoId || "") === String(route.id || "")
+    ) {
+      setActivePage(pageWatch);
+      setActiveNav("");
+      updateSubscribeButton();
+      setWatchLikeUi();
+      setWatchSaveUi();
+      return;
+    }
+
     // If a new watch id is opened while the old video is minimized, treat this
     // as a clean switch, not a restore of the previous video's state.
     if (isMini) {
@@ -5257,7 +5360,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (isSimFullscreen()) {
     event.preventDefault();
-    exitSimFullscreen();
+    exitAndroidFullscreenRoute();
     return;
   }
   if (document.fullscreenElement) {
