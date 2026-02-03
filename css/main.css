@@ -2477,6 +2477,34 @@ body.is-sim-fullscreen .watch-controls-title {
   max-width: 100%;
 }
 
+.library-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-meta-sep {
+  opacity: 0.75;
+}
+
+.library-view-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--yt-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.library-view-channel .material-symbols-rounded {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.library-view-channel:hover {
+  color: var(--yt-text);
+}
+
 .watch-side-title {
   font-size: 16px;
   font-weight: 600;

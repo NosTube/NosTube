@@ -145,6 +145,9 @@ const libraryInitials = document.getElementById("library-initials");
 const libraryImage = document.getElementById("library-image");
 const libraryTitle = document.getElementById("library-title");
 const libraryMeta = document.getElementById("library-meta");
+const libraryMetaText = document.getElementById("library-meta-text");
+const libraryMetaSep = document.getElementById("library-meta-sep");
+const libraryViewChannel = document.getElementById("library-view-channel");
 
 const searchBackBtn = document.getElementById("search-back");
 const searchTitle = document.getElementById("search-title");
@@ -173,6 +176,8 @@ let lastVolume = 1;
 let lastWatchedVideoId = "";
 let lastNonWatchHash = "#home";
 let lastNonSearchHash = "#home";
+let searchEntryHash = "#home";
+let searchEntryMainNavKey = "home";
 let lastSettingsHash = "#settings";
 let miniLastHash = "#home";
 let channelEntryHash = "#home";
@@ -1716,6 +1721,15 @@ if (authCopyNsec && authGeneratedNsec) {
 
 if (mobileSearch) {
   mobileSearch.addEventListener("click", () => {
+    const currentHash = window.location.hash || "#home";
+    if (!/^#search\b/i.test(currentHash)) {
+      const entryHash = /^#(watch|fullscreen)\b/i.test(currentHash)
+        ? miniLastHash || lastNonWatchHash || "#home"
+        : currentHash;
+      lastNonSearchHash = entryHash || lastNonSearchHash || "#home";
+      searchEntryHash = lastNonSearchHash;
+      searchEntryMainNavKey = lineageMainNavKeyFromHash(searchEntryHash);
+    }
     navigateFromWatchTo("#search/");
     requestAnimationFrame(() => focusTopbarSearchInput());
   });
@@ -1919,7 +1933,13 @@ function navigateToSearch(query) {
   const q = normalizeSearchQuery(query);
   const currentRoute = getRoute();
   if (currentRoute.page !== "search") {
-    lastNonSearchHash = window.location.hash || lastNonSearchHash || "#home";
+    const currentHash = window.location.hash || "#home";
+    const entryHash = /^#(watch|fullscreen)\b/i.test(currentHash)
+      ? miniLastHash || lastNonWatchHash || "#home"
+      : currentHash;
+    lastNonSearchHash = entryHash || lastNonSearchHash || "#home";
+    searchEntryHash = lastNonSearchHash;
+    searchEntryMainNavKey = lineageMainNavKeyFromHash(searchEntryHash);
   }
   const target = `#search/${encodeURIComponent(q)}`;
 
@@ -2477,7 +2497,7 @@ if (channelBackBtn) {
     const route = getRoute();
     let target = "#home";
     if (route.page === "search") {
-      target = lastNonSearchHash || "#home";
+      target = searchEntryHash || lastNonSearchHash || "#home";
     } else if (route.page === "channel") {
       target = channelEntryHash || "#home";
     } else if (route.page === "history" || route.page === "watchlater" || route.page === "liked") {
@@ -2797,7 +2817,11 @@ function setChannelHeaderLoading(pubkey) {
 
 function setLibraryHeaderLoading(pubkey) {
   if (libraryTitle) libraryTitle.textContent = "Your library";
-  if (libraryMeta) libraryMeta.textContent = shortenKey(pubkey) || "nostr profile";
+  const text = shortenKey(pubkey) || "nostr profile";
+  if (libraryMetaText) libraryMetaText.textContent = text;
+  else if (libraryMeta) libraryMeta.textContent = text;
+  if (libraryMetaSep) libraryMetaSep.hidden = true;
+  if (libraryViewChannel) libraryViewChannel.hidden = true;
   if (libraryInitials) libraryInitials.textContent = initialsFromName(pubkey);
   if (libraryAvatar) libraryAvatar.classList.remove("has-image");
   if (libraryImage) {
@@ -2812,7 +2836,10 @@ function renderLibraryHeader(pubkey) {
 
   if (!signedIn) {
     libraryTitle.textContent = "Library";
-    libraryMeta.textContent = "";
+    if (libraryMetaText) libraryMetaText.textContent = "";
+    else libraryMeta.textContent = "";
+    if (libraryMetaSep) libraryMetaSep.hidden = true;
+    if (libraryViewChannel) libraryViewChannel.hidden = true;
     if (libraryInitials) libraryInitials.textContent = "";
     libraryAvatar.classList.remove("has-image");
     if (libraryImage) {
@@ -2827,9 +2854,25 @@ function renderLibraryHeader(pubkey) {
   const nip05 = String(profile.nip05 || "").trim();
 
   libraryTitle.textContent = name || "Your library";
-  libraryMeta.textContent = nip05 || shortenKey(pubkey) || "nostr profile";
+  const text = nip05 || shortenKey(pubkey) || "nostr profile";
+  if (libraryMetaText) libraryMetaText.textContent = text;
+  else libraryMeta.textContent = text;
+  if (libraryMetaSep) libraryMetaSep.hidden = false;
+  if (libraryViewChannel) {
+    libraryViewChannel.hidden = false;
+    libraryViewChannel.setAttribute("href", `#channel/${pubkey}`);
+  }
   if (libraryInitials) libraryInitials.textContent = initialsFromName(name || pubkey);
   hydrateAvatar(libraryAvatar, profile);
+}
+
+if (libraryViewChannel) {
+  libraryViewChannel.addEventListener("click", (event) => {
+    event.preventDefault();
+    const pubkey = authState.pubkey;
+    if (!pubkey) return;
+    navToDeep(`#channel/${pubkey}`);
+  });
 }
 
 function renderChannelHeader(pubkey, token) {
@@ -3320,12 +3363,52 @@ function mainNavKeyFromHash(hash) {
   return "";
 }
 
+function getRouteFromHash(hash) {
+  const raw = String(hash || "").replace(/^#/, "");
+  if (!raw) return { page: "home" };
+  const [path, query] = raw.split("?");
+  const [page, id] = path.split("/");
+  const params = new URLSearchParams(query || "");
+  return {
+    page,
+    id: id || params.get("id") || params.get("v") || "",
+    params,
+  };
+}
+
+function lineageMainNavKeyFromHash(hash, depth = 0) {
+  const direct = mainNavKeyFromHash(hash);
+  if (direct) return direct;
+  if (depth > 2) return "home";
+  const route = getRouteFromHash(hash);
+
+  // Mirror deep-page ownership rules.
+  if (route.page === "history" || route.page === "watchlater" || route.page === "liked" || route.page === "settings") {
+    return "library";
+  }
+
+  // If we entered a channel/search from another deep page, recurse once.
+  if (route.page === "search") {
+    return searchEntryMainNavKey || lineageMainNavKeyFromHash(searchEntryHash || lastNonSearchHash, depth + 1) || "home";
+  }
+  if (route.page === "channel") {
+    return lineageMainNavKeyFromHash(channelEntryHash, depth + 1) || "home";
+  }
+
+  return "home";
+}
+
 function getLineageMainNavKey(route) {
   if (!route?.page) return "home";
   if (route.page === "home") return "home";
   if (route.page === "shorts") return "shorts";
   if (route.page === "subs") return "subs";
   if (route.page === "library") return "library";
+
+  // Watch routes should keep the owning main tab of the page underneath.
+  if (route.page === "watch" || route.page === "fullscreen") {
+    return lineageMainNavKeyFromHash(lastNonWatchHash) || "home";
+  }
 
   // Library deep pages should keep Library active.
   if (route.page === "history" || route.page === "watchlater" || route.page === "liked" || route.page === "settings") {
@@ -3334,10 +3417,13 @@ function getLineageMainNavKey(route) {
 
   // Channel/search should keep the main tab you came from active (when possible).
   if (route.page === "channel") {
-    return mainNavKeyFromHash(channelEntryHash) || "home";
+    if (/^#search\b/i.test(channelEntryHash)) {
+      return searchEntryMainNavKey || lineageMainNavKeyFromHash(searchEntryHash || lastNonSearchHash) || "home";
+    }
+    return lineageMainNavKeyFromHash(channelEntryHash) || "home";
   }
   if (route.page === "search") {
-    return mainNavKeyFromHash(lastNonSearchHash) || "home";
+    return searchEntryMainNavKey || lineageMainNavKeyFromHash(searchEntryHash || lastNonSearchHash) || "home";
   }
 
   return "home";
@@ -3487,7 +3573,7 @@ async function ensureWatchVideoLoaded(route) {
     watchStatus.hidden = false;
   }
   setActivePage(pageWatch);
-  setActiveNav("");
+  setActiveNav(getLineageMainNavKey(route));
   updateSubscribeButton();
   setWatchLikeUi();
   setWatchSaveUi();
@@ -4469,6 +4555,17 @@ function handleRoute() {
     lastSettingsHash = window.location.hash || lastSettingsHash || "#settings";
   }
 
+  if (changedPage && route.page === "search" && prevRoute.page !== "search") {
+    const entryHash = isWatchLike(prevRoute.page)
+      ? miniLastHash || lastNonWatchHash || "#home"
+      : prevHash || "#home";
+    if (entryHash && !/^#search\b/i.test(entryHash)) {
+      lastNonSearchHash = entryHash || lastNonSearchHash || "#home";
+      searchEntryHash = lastNonSearchHash;
+      searchEntryMainNavKey = lineageMainNavKeyFromHash(searchEntryHash);
+    }
+  }
+
   syncAndroidFullscreenForRoute(route);
 
   if (route.page) {
@@ -4499,10 +4596,18 @@ function handleRoute() {
       } else {
         channelEntryHash = prevHash || "#home";
       }
-      if (!channelEntryHash || /^#channel\b/i.test(channelEntryHash)) {
-        channelEntryHash = "#home";
+      // Never let the "entry" become another channel hash, otherwise lineage will
+      // recurse and fall back to Home. If we're coming from a channel, preserve the
+      // previous channel's owning entry instead.
+      if (/^#channel\b/i.test(channelEntryHash)) {
+        channelEntryHash = handleRoute._lastChannelEntryHash || "#home";
       }
+      if (!channelEntryHash) channelEntryHash = "#home";
     }
+  }
+
+  if (route.page === "channel") {
+    handleRoute._lastChannelEntryHash = channelEntryHash || handleRoute._lastChannelEntryHash || "#home";
   }
 
   if (changedPage && isWatchLike(prevRoute.page) && !isWatchLike(route.page)) {
@@ -4583,21 +4688,16 @@ function handleRoute() {
       lastWatchedVideoId = id;
     }
     setActivePage(pageWatch);
-    setActiveNav("");
+    setActiveNav(getLineageMainNavKey(route));
     updateSubscribeButton();
     setWatchLikeUi();
     setWatchSaveUi();
-    if (isAndroidMode() && id && String(watchLoadedVideoId || "") === id) {
-      return;
-    }
-    const current = getCurrentWatchVideo();
-    if (!current || String(current.id || "") !== id) {
-      const video = videoStore.get(id);
-      if (video) {
-        showWatchForVideo(video);
-      } else {
-        ensureWatchVideoLoaded({ page: "watch", id, params: route.params });
-      }
+
+    const video = videoStore.get(id);
+    if (video) {
+      showWatchForVideo(video);
+    } else {
+      ensureWatchVideoLoaded({ page: "watch", id, params: route.params });
     }
     return;
   }
@@ -4611,7 +4711,7 @@ function handleRoute() {
       String(watchLoadedVideoId || "") === String(route.id || "")
     ) {
       setActivePage(pageWatch);
-      setActiveNav("");
+      setActiveNav(getLineageMainNavKey(route));
       updateSubscribeButton();
       setWatchLikeUi();
       setWatchSaveUi();
@@ -4638,7 +4738,7 @@ function handleRoute() {
     if (resumeWatchOnRoute) {
       resumeWatchOnRoute = false;
       setActivePage(pageWatch);
-      setActiveNav("");
+      setActiveNav(getLineageMainNavKey(route));
       updateSubscribeButton();
       setWatchLikeUi();
       setWatchSaveUi();
@@ -4650,7 +4750,7 @@ function handleRoute() {
     } else {
       ensureWatchVideoLoaded(route);
     }
-    setActiveNav("");
+    setActiveNav(getLineageMainNavKey(route));
     updateSubscribeButton();
     return;
   }
