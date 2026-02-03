@@ -47,6 +47,9 @@
         <button class="icon-btn mobile-search" id="mobile-search" aria-label="Search">
           <span class="material-symbols-rounded">search</span>
         </button>
+        <button class="icon-btn" id="topbar-settings" aria-label="Settings" type="button">
+          <span class="material-symbols-rounded">settings</span>
+        </button>
         <div class="menu-anchor" id="search-more-anchor">
           <button class="icon-btn" id="search-more" aria-label="More" type="button">
             <span class="material-symbols-rounded">more_vert</span>
@@ -118,6 +121,10 @@
               <span class="material-symbols-rounded">videocam</span>
               Studio
             </a>
+            <button class="menu-item" id="menu-settings" type="button">
+              <span class="material-symbols-rounded">settings</span>
+              Settings
+            </button>
             <div class="menu-sep"></div>
             <button class="menu-item" id="menu-signout">
               <span class="material-symbols-rounded">logout</span>
@@ -298,6 +305,14 @@
             <div class="feed" id="feed-search"></div>
             <div class="feed-empty" id="feed-search-empty">Type something to search.</div>
           </section>
+        </section>
+
+        <section class="page" id="page-settings">
+          <div class="settings-shell">
+            <div class="settings-breadcrumbs" id="settings-breadcrumbs" hidden></div>
+            <h1 class="settings-title" id="settings-title">Settings</h1>
+            <div class="settings-content" id="settings-content"></div>
+          </div>
         </section>
 
         <section class="page page-watch" id="page-watch">

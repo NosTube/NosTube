@@ -23,6 +23,7 @@ const pageHistory = document.getElementById("page-history");
 const pageWatchlater = document.getElementById("page-watchlater");
 const pageLiked = document.getElementById("page-liked");
 const pageSearch = document.getElementById("page-search");
+const pageSettings = document.getElementById("page-settings");
 const pageWatch = document.getElementById("page-watch");
 const pageChannel = document.getElementById("page-channel");
 const sidebarNavLinks = Array.from(document.querySelectorAll(".sidebar a.sidebar-link[data-nav]"));
@@ -91,6 +92,7 @@ const userMenu = document.getElementById("user-menu");
 const menuUpload = document.getElementById("menu-upload");
 const menuLive = document.getElementById("menu-live");
 const menuYourChannel = document.getElementById("menu-your-channel");
+const menuSettings = document.getElementById("menu-settings");
 const menuSignout = document.getElementById("menu-signout");
 const authModal = document.getElementById("auth-modal");
 const authModalTitle = document.getElementById("auth-modal-title");
@@ -150,6 +152,11 @@ const searchMeta = document.getElementById("search-meta");
 const searchFeed = document.getElementById("feed-search");
 const searchEmpty = document.getElementById("feed-search-empty");
 const topbarTitle = document.getElementById("topbar-title");
+const topbarSettings = document.getElementById("topbar-settings");
+
+const settingsTitle = document.getElementById("settings-title");
+const settingsContent = document.getElementById("settings-content");
+const settingsBreadcrumbs = document.getElementById("settings-breadcrumbs");
 
 const subsFeed = document.getElementById("feed-subs");
 const subsEmpty = document.getElementById("feed-subs-empty");
@@ -166,6 +173,7 @@ let lastVolume = 1;
 let lastWatchedVideoId = "";
 let lastNonWatchHash = "#home";
 let lastNonSearchHash = "#home";
+let lastSettingsHash = "#settings";
 let miniLastHash = "#home";
 let channelEntryHash = "#home";
 let isMini = false;
@@ -225,6 +233,329 @@ function initAndroidModeFlagFromUrl() {
   } catch {
     isAndroidModeCached = false;
   }
+}
+
+function renderSettingsPage(route) {
+  if (!settingsContent) return;
+  const section = String(route?.id || "");
+  if (settingsTitle) {
+    settingsTitle.textContent = "Settings";
+  }
+  const sectionTitle = (key) => {
+    const k = String(key || "").toLowerCase();
+    if (k === "account") return "Account";
+    if (k === "appearance") return "Appearance";
+    if (k === "playback") return "Playback";
+    if (k === "privacy") return "Privacy";
+    if (k === "about") return "About";
+    return "Settings";
+  };
+
+  const updateBreadcrumbs = () => {
+    if (!settingsBreadcrumbs) return;
+    const desktop = !isMobileUi();
+    const isRoot = !section;
+    if (!desktop) {
+      settingsBreadcrumbs.hidden = true;
+      settingsBreadcrumbs.innerHTML = "";
+      return;
+    }
+    if (isRoot) {
+      settingsBreadcrumbs.hidden = true;
+      settingsBreadcrumbs.innerHTML = "";
+      return;
+    }
+
+    const current = sectionTitle(section);
+    settingsBreadcrumbs.hidden = false;
+    settingsBreadcrumbs.innerHTML = `
+      <button class="settings-crumb" type="button" data-settings-crumb="root">Settings</button>
+      <span class="material-symbols-rounded settings-crumb-sep" aria-hidden="true">chevron_right</span>
+      <span class="settings-crumb-current">${escapeHtml(current)}</span>
+    `;
+    const rootBtn = settingsBreadcrumbs.querySelector('[data-settings-crumb="root"]');
+    if (rootBtn) {
+      rootBtn.addEventListener("click", () => {
+        // Match the mobile topbar back button: go back one step in browser history.
+        // Fallback to the Settings root when there is no back entry.
+        if (getCurrentAppIndex() > 0) {
+          try {
+            history.back();
+            return;
+          } catch {}
+        }
+        navToDeep("#settings");
+      });
+    }
+  };
+
+  const escapeHtml = (value) => {
+    const s = String(value || "");
+    return s.replace(/[&<>"']/g, (c) => {
+      if (c === "&") return "&amp;";
+      if (c === "<") return "&lt;";
+      if (c === ">") return "&gt;";
+      if (c === '"') return "&quot;";
+      return "&#39;";
+    });
+  };
+
+  if (!section) {
+    updateBreadcrumbs();
+    settingsContent.innerHTML = `
+      <div class="settings-group" role="group" aria-label="Account">
+        <div class="settings-group-title">Account</div>
+        <button class="settings-item" type="button" data-settings-section="account">
+          <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">person</span>
+          <span class="settings-item-label">Account</span>
+        </button>
+      </div>
+
+      <div class="settings-group" role="group" aria-label="Preferences">
+        <div class="settings-group-title">Preferences</div>
+        <button class="settings-item" type="button" data-settings-section="appearance">
+          <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">palette</span>
+          <span class="settings-item-label">Appearance</span>
+        </button>
+        <button class="settings-item" type="button" data-settings-section="playback">
+          <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">play_circle</span>
+          <span class="settings-item-label">Playback</span>
+        </button>
+      </div>
+
+      <div class="settings-group" role="group" aria-label="Privacy">
+        <div class="settings-group-title">Privacy</div>
+        <button class="settings-item" type="button" data-settings-section="privacy">
+          <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">shield</span>
+          <span class="settings-item-label">Privacy</span>
+        </button>
+      </div>
+
+      <div class="settings-group" role="group" aria-label="About">
+        <div class="settings-group-title">About</div>
+        <button class="settings-item" type="button" data-settings-section="about">
+          <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">info</span>
+          <span class="settings-item-label">About</span>
+        </button>
+      </div>
+    `;
+    settingsContent.querySelectorAll("[data-settings-section]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.getAttribute("data-settings-section") || "";
+        if (!key) return;
+        navToDeep(`#settings/${key}`);
+      });
+    });
+    return;
+  }
+
+  const title = sectionTitle(section);
+  if (settingsTitle) settingsTitle.textContent = title;
+  updateBreadcrumbs();
+  if (section === "account") {
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">${escapeHtml(title)}</div>
+        <div class="settings-section-sub">Manage your identity, sign-in, and profile details.</div>
+
+        <div class="settings-group" role="group" aria-label="Identity">
+          <div class="settings-group-title">Identity</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Public key</div>
+              <div class="settings-row-desc">View/copy your Nostr pubkey.</div>
+            </div>
+            <button class="settings-row-action" type="button" disabled>Copy</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Profile</div>
+              <div class="settings-row-desc">Name, picture, and about.</div>
+            </div>
+            <button class="settings-row-action" type="button" disabled>Edit</button>
+          </div>
+        </div>
+
+        <div class="settings-group" role="group" aria-label="Security">
+          <div class="settings-group-title">Security</div>
+          <label class="settings-row settings-toggle">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Require confirmation before publishing</div>
+              <div class="settings-row-desc">Adds an extra step before sending events.</div>
+            </div>
+            <input type="checkbox" disabled />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (section === "appearance") {
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">${escapeHtml(title)}</div>
+        <div class="settings-section-sub">Customize how NosTube looks and feels.</div>
+
+        <div class="settings-group" role="group" aria-label="Theme">
+          <div class="settings-group-title">Theme</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Color scheme</div>
+              <div class="settings-row-desc">Light / Dark / System</div>
+            </div>
+            <select class="settings-select" disabled>
+              <option>System</option>
+              <option>Light</option>
+              <option>Dark</option>
+            </select>
+          </div>
+          <label class="settings-row settings-toggle">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Reduce motion</div>
+              <div class="settings-row-desc">Minimize animations and transitions.</div>
+            </div>
+            <input type="checkbox" disabled />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="settings-group" role="group" aria-label="Player">
+          <div class="settings-group-title">Player</div>
+          <label class="settings-row settings-toggle">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Always show video title in fullscreen</div>
+              <div class="settings-row-desc">Matches native-style fullscreen UI.</div>
+            </div>
+            <input type="checkbox" disabled checked />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (section === "playback") {
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">${escapeHtml(title)}</div>
+        <div class="settings-section-sub">Control default playback behavior.</div>
+
+        <div class="settings-group" role="group" aria-label="Defaults">
+          <div class="settings-group-title">Defaults</div>
+          <label class="settings-row settings-toggle">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Autoplay next</div>
+              <div class="settings-row-desc">Automatically start the next video.</div>
+            </div>
+            <input type="checkbox" disabled />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+          <label class="settings-row settings-toggle">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Remember volume</div>
+              <div class="settings-row-desc">Keep your volume between sessions.</div>
+            </div>
+            <input type="checkbox" disabled checked />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <div class="settings-group" role="group" aria-label="Quality">
+          <div class="settings-group-title">Quality</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Default quality</div>
+              <div class="settings-row-desc">Auto / 1080p / 720p</div>
+            </div>
+            <select class="settings-select" disabled>
+              <option>Auto</option>
+              <option>1080p</option>
+              <option>720p</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (section === "privacy") {
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">${escapeHtml(title)}</div>
+        <div class="settings-section-sub">Control what’s stored locally and what’s shared.</div>
+
+        <div class="settings-group" role="group" aria-label="Local data">
+          <div class="settings-group-title">Local data</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Clear watch history</div>
+              <div class="settings-row-desc">Removes local watch history from this device.</div>
+            </div>
+            <button class="settings-row-action" type="button" disabled>Clear</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Clear saved videos</div>
+              <div class="settings-row-desc">Removes Watch later and likes stored locally.</div>
+            </div>
+            <button class="settings-row-action" type="button" disabled>Clear</button>
+          </div>
+        </div>
+
+        <div class="settings-group" role="group" aria-label="Sharing">
+          <div class="settings-group-title">Sharing</div>
+          <label class="settings-row settings-toggle">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Send diagnostics</div>
+              <div class="settings-row-desc">Help improve reliability by sharing anonymous info.</div>
+            </div>
+            <input type="checkbox" disabled />
+            <span class="settings-switch" aria-hidden="true"></span>
+          </label>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (section === "about") {
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">${escapeHtml(title)}</div>
+        <div class="settings-section-sub">App details, credits, and links.</div>
+
+        <div class="settings-group" role="group" aria-label="App">
+          <div class="settings-group-title">App</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Version</div>
+              <div class="settings-row-desc">Preview build</div>
+            </div>
+            <div class="settings-row-value">1.0</div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Source</div>
+              <div class="settings-row-desc">View project repository.</div>
+            </div>
+            <button class="settings-row-action" type="button" disabled>Open</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  settingsContent.innerHTML = `
+    <div class="settings-section">
+      <div class="settings-section-title">${escapeHtml(title)}</div>
+      <div class="settings-section-sub">Coming soon.</div>
+    </div>
+  `;
 }
 
 function isFullscreenRoute(route) {
@@ -397,6 +728,13 @@ async function ensureNotFullscreenForMini() {
       return;
     }
     window.setTimeout(finish, 500);
+  });
+}
+
+if (menuSettings) {
+  menuSettings.addEventListener("click", () => {
+    closeAllMenus();
+    navigateFromWatchTo("#settings");
   });
 }
 
@@ -736,6 +1074,22 @@ function syncTopbarMode() {
   let useChannel = false;
   let useSearch = false;
   let useDeep = false;
+  let useLibrary = false;
+
+  const getSettingsSectionTitleForHash = (hash) => {
+    const raw = String(hash || "").replace(/^#/, "");
+    const [path] = raw.split("?");
+    const [page, id] = path.split("/");
+    if (page !== "settings") return "";
+    const k = String(id || "").toLowerCase();
+    if (!k) return "Settings";
+    if (k === "account") return "Account";
+    if (k === "appearance") return "Appearance";
+    if (k === "playback") return "Playback";
+    if (k === "privacy") return "Privacy";
+    if (k === "about") return "About";
+    return "Settings";
+  };
 
   if (mobile && route.page === "channel") {
     useChannel = true;
@@ -743,6 +1097,10 @@ function syncTopbarMode() {
 
   if (mobile && route.page === "search") {
     useSearch = true;
+  }
+
+  if (mobile && route.page === "library") {
+    useLibrary = true;
   }
 
   if (mobile && (route.page === "watch" || route.page === "fullscreen")) {
@@ -765,15 +1123,28 @@ function syncTopbarMode() {
     if (underlayDragPage === pageLiked) useDeep = true;
     if (watchTransitionUnderlay === pageLiked) useDeep = true;
     if (topbarUnderlayOverridePage === pageLiked) useDeep = true;
+
+    if (underlayDragPage === pageSettings) useDeep = true;
+    if (watchTransitionUnderlay === pageSettings) useDeep = true;
+    if (topbarUnderlayOverridePage === pageSettings) useDeep = true;
+
+    if (underlayDragPage === pageLibrary) useLibrary = true;
+    if (watchTransitionUnderlay === pageLibrary) useLibrary = true;
+    if (topbarUnderlayOverridePage === pageLibrary) useLibrary = true;
   }
 
-  if (mobile && (route.page === "history" || route.page === "watchlater" || route.page === "liked")) {
+  if (
+    mobile &&
+    (route.page === "history" || route.page === "watchlater" || route.page === "liked" || route.page === "settings")
+  ) {
     useDeep = true;
   }
 
   document.body.classList.toggle("is-channel-topbar", Boolean(useChannel));
   document.body.classList.toggle("is-search-topbar", Boolean(useSearch));
   document.body.classList.toggle("is-deep-topbar", Boolean(useDeep));
+  document.body.classList.toggle("is-library-topbar", Boolean(useLibrary));
+
   const showBack = Boolean(useChannel || useSearch || useDeep);
   const showChannelControls = Boolean(useChannel);
   if (channelBackBtn) channelBackBtn.hidden = !showBack;
@@ -783,15 +1154,31 @@ function syncTopbarMode() {
   }
 
   if (topbarTitle) {
-    if (useDeep) {
+    if (useDeep || useLibrary) {
       let title = "";
       if (route.page === "history") title = "History";
       if (route.page === "watchlater") title = "Watch later";
       if (route.page === "liked") title = "Liked videos";
+      if (route.page === "settings") title = getSettingsSectionTitleForHash(window.location.hash || "#settings") || "Settings";
+      if (route.page === "library") title = "Library";
       if (!title) {
         if (underlayDragPage === pageHistory) title = "History";
         if (underlayDragPage === pageWatchlater) title = "Watch later";
         if (underlayDragPage === pageLiked) title = "Liked videos";
+        if (underlayDragPage === pageSettings) {
+          title = getSettingsSectionTitleForHash(lastSettingsHash) || "Settings";
+        }
+        if (underlayDragPage === pageLibrary) title = "Library";
+
+        if (watchTransitionUnderlay === pageSettings) {
+          title = getSettingsSectionTitleForHash(lastSettingsHash) || "Settings";
+        }
+        if (watchTransitionUnderlay === pageLibrary) title = "Library";
+
+        if (topbarUnderlayOverridePage === pageSettings) {
+          title = getSettingsSectionTitleForHash(lastSettingsHash) || "Settings";
+        }
+        if (topbarUnderlayOverridePage === pageLibrary) title = "Library";
       }
       topbarTitle.textContent = title || "";
       topbarTitle.hidden = false;
@@ -1330,6 +1717,13 @@ if (mobileSearch) {
   mobileSearch.addEventListener("click", () => {
     navigateFromWatchTo("#search/");
     requestAnimationFrame(() => focusTopbarSearchInput());
+  });
+}
+
+if (topbarSettings) {
+  topbarSettings.addEventListener("click", () => {
+    closeAllMenus();
+    navigateFromWatchTo("#settings");
   });
 }
 
@@ -2707,6 +3101,7 @@ function setActivePage(page) {
     pageWatchlater,
     pageLiked,
     pageSearch,
+    pageSettings,
     pageWatch,
     pageChannel,
   ];
@@ -2720,6 +3115,7 @@ function setActivePage(page) {
   }
   document.body.classList.toggle("is-watch", page === pageWatch);
   document.body.classList.toggle("is-search", page === pageSearch);
+  document.body.classList.toggle("is-settings", page === pageSettings);
 
   if (topbarUnderlayOverridePage) {
     topbarUnderlayOverridePage = null;
@@ -2802,6 +3198,7 @@ function getPageForHash(hash) {
   if (page === "watchlater") return pageWatchlater;
   if (page === "liked") return pageLiked;
   if (page === "search") return pageSearch;
+  if (page === "settings") return pageSettings;
   if (page === "fullscreen") return pageWatch;
   if (page === "channel") return pageChannel;
   return pageHome;
@@ -2930,7 +3327,7 @@ function getLineageMainNavKey(route) {
   if (route.page === "library") return "library";
 
   // Library deep pages should keep Library active.
-  if (route.page === "history" || route.page === "watchlater" || route.page === "liked") {
+  if (route.page === "history" || route.page === "watchlater" || route.page === "liked" || route.page === "settings") {
     return "library";
   }
 
@@ -4067,6 +4464,10 @@ function handleRoute() {
     ? !isWatchLike(prevRoute.page)
     : route.page !== prevRoute.page;
 
+  if (route.page === "settings") {
+    lastSettingsHash = window.location.hash || lastSettingsHash || "#settings";
+  }
+
   syncAndroidFullscreenForRoute(route);
 
   if (route.page) {
@@ -4160,6 +4561,12 @@ function handleRoute() {
     setActivePage(pageLiked);
     setActiveNav(getLineageMainNavKey(route));
     renderLocalPages();
+    return;
+  }
+  if (route.page === "settings") {
+    setActivePage(pageSettings);
+    setActiveNav(getLineageMainNavKey(route));
+    renderSettingsPage(route);
     return;
   }
   if (route.page === "fullscreen") {
