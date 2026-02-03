@@ -31,6 +31,9 @@ const watchPlayer = document.getElementById("watch-player");
 const watchVideo = document.getElementById("watch-video");
 const watchPoster = document.getElementById("watch-poster");
 const watchStatus = document.getElementById("watch-status");
+const watchControls = watchPlayer ? watchPlayer.querySelector(".watch-controls") : null;
+const watchControlsProgress = watchPlayer ? watchPlayer.querySelector(".watch-controls-progress") : null;
+const watchMinimize = document.getElementById("watch-minimize");
 const watchControlsTitle = document.getElementById("watch-controls-title");
 const watchToggle = document.getElementById("watch-toggle");
 const watchToggleIcon = document.getElementById("watch-toggle-icon");
@@ -198,6 +201,11 @@ let mainNavHasHomeBase = false;
 let homeResetInProgress = false;
 let homeResetGuardTimer = 0;
 let pendingMainAfterHomeReset = "";
+let watchControlsHideTimer = 0;
+let watchControlsLastShownAt = 0;
+let watchControlsPinned = false;
+let watchControlsIgnoreActivityUntil = 0;
+let watchControlsLastTapToggleAt = 0;
 
 const ANDROID_MODE_KEY = "nostube-android-mode";
 let isAndroidModeCached = null;
@@ -2625,6 +2633,20 @@ function updateWatchProgress() {
       watchProgress.value = duration ? String(current) : "0";
     }
   }
+
+  if (watchPlayer) {
+    const pct = duration ? Math.max(0, Math.min(1, current / duration)) : 0;
+    let bufPct = 0;
+    try {
+      const b = watchVideo.buffered;
+      if (b && b.length) {
+        const end = b.end(b.length - 1);
+        bufPct = duration ? Math.max(0, Math.min(1, end / duration)) : 0;
+      }
+    } catch {}
+    watchPlayer.style.setProperty("--watch-progress", String(pct * 100));
+    watchPlayer.style.setProperty("--watch-buffer", String(bufPct * 100));
+  }
 }
 
 function togglePlay() {
@@ -3484,6 +3506,202 @@ function clearDockDrag() {
 
 function isMobileUi() {
   return window.matchMedia?.("(max-width: 720px)")?.matches ?? false;
+}
+
+function isWatchRouteActive() {
+  const route = getRoute();
+  return route.page === "watch" || route.page === "fullscreen";
+}
+
+function isInAnyFullscreenUi() {
+  return Boolean(document.fullscreenElement) || isSimFullscreen();
+}
+
+function isMobileThinProgressMode() {
+  return isMobileUi() && !isInAnyFullscreenUi();
+}
+
+function clearWatchControlsHideTimer() {
+  if (!watchControlsHideTimer) return;
+  try {
+    window.clearTimeout(watchControlsHideTimer);
+  } catch {}
+  watchControlsHideTimer = 0;
+}
+
+function setWatchControlsEnabled(enabled) {
+  if (!watchPlayer) return;
+  const controls = watchControls || watchPlayer;
+  const nodes = Array.from(controls.querySelectorAll("button, input, select, textarea"));
+  nodes.forEach((el) => {
+    if (!el) return;
+    if (el === watchVideo) return;
+    try {
+      if ("disabled" in el) el.disabled = !enabled;
+    } catch {}
+  });
+
+  if (!enabled && watchProgress && watchPlayer.classList.contains("is-controls-hidden") && isMobileThinProgressMode()) {
+    try {
+      watchProgress.disabled = false;
+    } catch {}
+  }
+
+  if (watchMinimize) {
+    try {
+      watchMinimize.disabled = !enabled;
+    } catch {}
+  }
+}
+
+function showWatchControls({ pin = false, deferEnable = false } = {}) {
+  if (!watchPlayer) return;
+  watchControlsPinned = Boolean(pin);
+  watchControlsLastShownAt = Date.now();
+  watchPlayer.classList.remove("is-controls-hidden");
+  if (!deferEnable) {
+    setWatchControlsEnabled(true);
+  }
+  clearWatchControlsHideTimer();
+}
+
+function scheduleHideWatchControls() {
+  if (!watchPlayer || !watchVideo) return;
+  if (!isWatchRouteActive()) return;
+  if (watchControlsPinned) return;
+  if (!watchVideo.paused && !watchVideo.ended && !isScrubbingProgress) {
+    const delay = isMobileUi() ? 3000 : 2200;
+    clearWatchControlsHideTimer();
+    watchControlsHideTimer = window.setTimeout(() => {
+      if (!watchPlayer || !watchVideo) return;
+      if (!isWatchRouteActive()) return;
+      if (watchControlsPinned) return;
+      if (isScrubbingProgress) return;
+      if (watchVideo.paused || watchVideo.ended) return;
+      watchPlayer.classList.add("is-controls-hidden");
+      setWatchControlsEnabled(false);
+    }, delay);
+  }
+}
+
+function pokeWatchControls() {
+  if (!isWatchRouteActive()) return;
+  showWatchControls({ pin: false });
+  scheduleHideWatchControls();
+}
+
+function initWatchControlsAutohide() {
+  if (!watchPlayer || !watchVideo || !watchControls) return;
+
+  const onMouseMove = () => {
+    if (Date.now() < (watchControlsIgnoreActivityUntil || 0)) return;
+    pokeWatchControls();
+  };
+
+  const onPointerMove = (event) => {
+    if (event?.pointerType && event.pointerType !== "mouse") return;
+    onMouseMove();
+  };
+
+  const shouldIgnoreTapTarget = (event) => {
+    if (event?.target?.closest?.("button, a, textarea, select, label")) return true;
+    if (event?.target?.closest?.('input[type="range"]')) return true;
+    if (event?.target?.closest?.(".watch-control-btn, .watch-controls-progress, input")) return true;
+    return false;
+  };
+
+  const toggleFromTap = () => {
+    watchControlsIgnoreActivityUntil = Date.now() + 650;
+    watchControlsLastTapToggleAt = Date.now();
+
+    const isHidden = watchPlayer.classList.contains("is-controls-hidden");
+    if (isHidden) {
+      showWatchControls({ pin: false, deferEnable: true });
+      scheduleHideWatchControls();
+      try {
+        window.setTimeout(() => {
+          setWatchControlsEnabled(true);
+        }, 0);
+      } catch {
+        setWatchControlsEnabled(true);
+      }
+      return;
+    }
+
+    watchControlsPinned = false;
+    watchPlayer.classList.add("is-controls-hidden");
+    clearWatchControlsHideTimer();
+    setWatchControlsEnabled(false);
+  };
+
+  const onTapToggleClick = (event) => {
+    if (!isWatchRouteActive()) return;
+    if (shouldIgnoreTapTarget(event)) return;
+    if (Date.now() - (watchControlsLastTapToggleAt || 0) < 500) return;
+    toggleFromTap();
+  };
+
+  const onTapTogglePointerUp = (event) => {
+    if (!isWatchRouteActive()) return;
+    if (event?.pointerType && event.pointerType === "mouse") return;
+    if (shouldIgnoreTapTarget(event)) return;
+    toggleFromTap();
+  };
+
+  watchPlayer.addEventListener("mousemove", onMouseMove, { passive: true });
+  watchPlayer.addEventListener("pointermove", onPointerMove, { passive: true });
+  watchPlayer.addEventListener("pointerup", onTapTogglePointerUp, { passive: true });
+  watchPlayer.addEventListener("click", onTapToggleClick, { passive: true });
+
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!isWatchRouteActive()) return;
+      if (!isInAnyFullscreenUi()) return;
+      const k = String(event.key || "");
+      if (k === " " || k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowUp" || k === "ArrowDown") {
+        pokeWatchControls();
+      }
+    },
+    { passive: true }
+  );
+
+  watchVideo.addEventListener("play", () => {
+    showWatchControls({ pin: false });
+    scheduleHideWatchControls();
+  });
+  watchVideo.addEventListener("pause", () => {
+    showWatchControls({ pin: true });
+  });
+  watchVideo.addEventListener("ended", () => {
+    showWatchControls({ pin: true });
+  });
+
+  watchVideo.addEventListener("seeking", () => {
+    showWatchControls({ pin: true });
+  });
+  watchVideo.addEventListener("seeked", () => {
+    showWatchControls({ pin: false });
+    scheduleHideWatchControls();
+  });
+
+  if (watchProgress) {
+    watchProgress.addEventListener(
+      "pointerdown",
+      () => {
+        showWatchControls({ pin: true });
+      },
+      { passive: true }
+    );
+    watchProgress.addEventListener(
+      "pointerup",
+      () => {
+        showWatchControls({ pin: false });
+        scheduleHideWatchControls();
+      },
+      { passive: true }
+    );
+  }
 }
 
 function handleMiniTouchStart(event) {
@@ -5314,11 +5532,15 @@ if (watchSubscribeBtn) {
 document.addEventListener("fullscreenchange", () => {
   if (isSimFullscreen()) {
     if (watchFullscreenIcon) watchFullscreenIcon.textContent = "fullscreen_exit";
+    showWatchControls({ pin: false });
+    scheduleHideWatchControls();
     return;
   }
   if (watchFullscreenIcon) {
     watchFullscreenIcon.textContent = document.fullscreenElement ? "fullscreen_exit" : "fullscreen";
   }
+  showWatchControls({ pin: false });
+  scheduleHideWatchControls();
   if (!document.fullscreenElement) {
     unlockOrientation();
     if (pendingMiniAfterFullscreenExit) {
@@ -5337,8 +5559,8 @@ if (watchVideo) {
   watchVideo.addEventListener("play", setPlayState);
   watchVideo.addEventListener("pause", setPlayState);
   watchVideo.addEventListener("ended", setPlayState);
+  initWatchControlsAutohide();
   watchVideo.addEventListener("volumechange", setVolumeState);
-  watchVideo.addEventListener("click", togglePlay);
   watchVideo.addEventListener("playing", () => {
     if (watchPoster) watchPoster.classList.remove("is-visible");
     if (watchStatus) {

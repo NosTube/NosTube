@@ -1627,7 +1627,7 @@ body.is-docking .mini-player {
   width: 100%;
   border-radius: 16px;
   background: #000;
-  overflow: hidden;
+  /* overflow: hidden; */ /* removed for now, so long as it causes no real issues to remove it */
   display: block;
   aspect-ratio: var(--watch-aspect, 16 / 9);
 }
@@ -1713,6 +1713,7 @@ body.is-sim-fullscreen #watch-video {
 #watch-video {
   width: 100%;
   height: 100%;
+  border-radius: 8px;
   background: #000;
   object-fit: contain;
   position: relative;
@@ -1762,11 +1763,25 @@ body.is-sim-fullscreen #watch-video {
   flex-direction: column;
   justify-content: flex-end;
   padding: 18px 18px 16px;
+  border-radius: 8px;
   gap: 12px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, 0.65));
   z-index: 4;
   pointer-events: none;
   color: #fff;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms ease;
+}
+
+.watch-player.is-controls-hidden .watch-controls {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.watch-player.is-controls-hidden .watch-controls * {
+  pointer-events: none;
 }
 
 .watch-controls * {
@@ -1782,17 +1797,149 @@ body.is-sim-fullscreen #watch-video {
 .watch-controls-title {
   font-size: 18px;
   font-weight: 600;
+  display: none;
+}
+
+.watch-player:fullscreen .watch-controls-title {
+  display: block;
+}
+
+body.is-sim-fullscreen .watch-controls-title {
+  display: block;
 }
 
 .watch-controls-progress {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative;
+}
+
+.watch-progress-ui {
+  position: relative;
+  width: 100%;
+  height: 14px;
+}
+
+.watch-progress-track,
+.watch-progress-buffer,
+.watch-progress-played {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+}
+
+.watch-progress-track {
+  background: #80808080;
+}
+
+.watch-progress-buffer {
+  right: auto;
+  width: calc(var(--watch-buffer, 0) * 1%);
+  background: #80808073;
+}
+
+.watch-progress-played {
+  right: auto;
+  width: calc(var(--watch-progress, 0) * 1%);
+  background: var(--yt-red);
+}
+
+.watch-progress-thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--watch-progress, 0) * 1%);
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: var(--yt-red);
+  box-shadow: 0 0 4px 2px rgb(0 0 0 / 15%);
 }
 
 .watch-controls-progress input[type="range"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 14px;
   width: 100%;
-  accent-color: var(--yt-red);
+  margin: 0;
+  opacity: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.watch-controls-progress input[type="range"]:focus-visible + .watch-controls-time,
+.watch-controls-progress input[type="range"]:focus-visible {
+  outline: none;
+}
+
+@media (max-width: 720px) {
+
+  #watch-video, .watch-controls {
+    border-radius: 0;
+  }
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-controls-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0;
+    gap: 0;
+    background: #80808080;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-progress-ui {
+    height: 4px;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-progress-track,
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-progress-buffer,
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-progress-played {
+    height: 4px;
+    border-radius: 0;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-progress-thumb {
+    width: 12px;
+    height: 12px;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-controls-progress input[type="range"] {
+    height: 4px;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen) .watch-controls-time {
+    display: none;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen).is-controls-hidden .watch-controls {
+    opacity: 1;
+    background: none;
+    padding: 0;
+    visibility: visible;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen).is-controls-hidden .watch-controls-progress,
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen).is-controls-hidden .watch-controls-progress * {
+    pointer-events: auto;
+  }
+
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen).is-controls-hidden .watch-controls-top,
+  body:not(.is-sim-fullscreen) .watch-player:not(:fullscreen).is-controls-hidden .watch-controls-actions {
+    display: none;
+  }
+}
+
+.watch-player.is-controls-hidden .watch-minimize {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .watch-controls-time {
