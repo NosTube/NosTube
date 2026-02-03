@@ -176,6 +176,7 @@ let lastNonSearchHash = "#home";
 let lastSettingsHash = "#settings";
 let miniLastHash = "#home";
 let channelEntryHash = "#home";
+let forceMyChannelOwnedByLibraryOnce = false;
 let isMini = false;
 let touchStartY = null;
 let touchStartTime = 0;
@@ -4487,13 +4488,20 @@ function handleRoute() {
   syncTopbarMode();
 
   if (changedPage && route.page === "channel" && prevRoute.page !== "channel") {
-    if (/^#watch\b/i.test(prevHash)) {
-      channelEntryHash = miniLastHash || lastNonWatchHash || "#home";
+    // When opening *your own* channel from the user menu, make it behave like Settings:
+    // it is "owned" by Library for main-nav highlighting.
+    if (forceMyChannelOwnedByLibraryOnce && authState.pubkey && String(route.id || "") === String(authState.pubkey)) {
+      channelEntryHash = "#library";
+      forceMyChannelOwnedByLibraryOnce = false;
     } else {
-      channelEntryHash = prevHash || "#home";
-    }
-    if (!channelEntryHash || /^#channel\b/i.test(channelEntryHash)) {
-      channelEntryHash = "#home";
+      if (/^#watch\b/i.test(prevHash)) {
+        channelEntryHash = miniLastHash || lastNonWatchHash || "#home";
+      } else {
+        channelEntryHash = prevHash || "#home";
+      }
+      if (!channelEntryHash || /^#channel\b/i.test(channelEntryHash)) {
+        channelEntryHash = "#home";
+      }
     }
   }
 
@@ -5654,6 +5662,8 @@ if (menuYourChannel) {
       openAuthModal("chooser");
       return;
     }
+
+    forceMyChannelOwnedByLibraryOnce = true;
 
     // Ensure channel navigation participates in our in-app history stack.
     // Only replace from watch (non-mini) to keep watch ephemeral.

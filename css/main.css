@@ -166,7 +166,7 @@ button {
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .topbar-title {
@@ -195,7 +195,6 @@ body.is-search-topbar #search-more-anchor {
 body.is-library-topbar #menu-toggle,
 body.is-library-topbar .brand,
 body.is-library-topbar #create-anchor,
-body.is-library-topbar [aria-label="Notifications"],
 body.is-library-topbar #user-anchor,
 body.is-library-topbar #search-more-anchor,
 body.is-library-topbar #channel-more-anchor {
@@ -1122,6 +1121,38 @@ body.is-library-topbar .topbar-right {
 }
 
 @media (max-width: 720px) {
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #menu-toggle,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) .topbar-center,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #create-anchor,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #user-anchor,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #topbar-settings,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #search-more-anchor,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #channel-more-anchor,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #channel-back,
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) .topbar-title {
+    display: none;
+  }
+
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) .topbar-right [aria-label="Notifications"] {
+    order: 1;
+  }
+
+  body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) .topbar-right .mobile-search {
+    order: 2;
+  }
+
+  body.is-library-topbar .topbar-right [aria-label="Notifications"] {
+    order: 1;
+  }
+
+  body.is-library-topbar .topbar-right .mobile-search {
+    order: 2;
+  }
+
+  body.is-library-topbar .topbar-right #topbar-settings {
+    order: 3;
+  }
+
   body.is-search-topbar #menu-toggle,
   body.is-search-topbar .brand,
   body.is-search-topbar #create-anchor,
@@ -1203,6 +1234,7 @@ body.is-library-topbar .topbar-right {
 
   body.is-deep-topbar .topbar-left .topbar-title {
     display: block;
+    line-height: 1;
   }
 
   body.is-deep-topbar .topbar-right #search-more-anchor,
@@ -2656,7 +2688,7 @@ body.sidebar-collapsed .sidebar-link {
   }
 
   .topbar-right {
-    gap: 6px;
+    gap: 8px;
   }
 
   .mobile-search {
