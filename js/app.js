@@ -4693,10 +4693,10 @@ function handleRoute() {
     setWatchLikeUi();
     setWatchSaveUi();
 
-    const video = videoStore.get(id);
-    if (video) {
-      showWatchForVideo(video);
-    } else {
+    // Android simulated fullscreen is a UI mode. Avoid reloading the video when
+    // entering #fullscreen for the same watch id, otherwise playback can glitch
+    // or restart.
+    if (id && String(watchLoadedVideoId || "") !== id) {
       ensureWatchVideoLoaded({ page: "watch", id, params: route.params });
     }
     return;
