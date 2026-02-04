@@ -5844,6 +5844,11 @@ if (watchShareLink) {
 }
 
 if (watchShareNative) {
+  try {
+    watchShareNative.hidden = !(window.isSecureContext && typeof navigator.share === "function");
+  } catch {
+    watchShareNative.hidden = true;
+  }
   watchShareNative.addEventListener("click", async () => {
     closeAllMenus();
     const video = getCurrentWatchVideo();
