@@ -1151,27 +1151,37 @@ body.is-library-topbar .topbar-right {
     z-index: 1001;
     pointer-events: auto;
   }
-
   .menu.is-sheet .menu-item {
     padding: 14px 12px;
-    border-radius: 12px;
+    border-radius: 4px; /* Default for middle items */
     font-size: 16px;
     background: #fff;
+    border: none;
+    display: flex;
+    width: 100%;
   }
 
-  .menu.is-sheet .menu-item:first-child {
-    border-radius: 16px 16px 4px 4px;
-  }
-  .menu.is-sheet .menu-item:last-child {
-    border-radius: 4px 4px 16px 16px;
-  }
-  .menu.is-sheet .menu-item:not(:first-child):not(:last-child) {
-    border-radius: 4px;
-  }
-  .menu.is-sheet .menu-item:first-child:last-child {
-    border-radius: 16px;
+  /* --- Top Edges --- */
+  /* Round top if it's the first child OR follows a separator */
+  .menu.is-sheet .menu-item:first-child,
+  .menu.is-sheet .menu-sep + .menu-item {
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
   }
 
+  /* --- Bottom Edges --- */
+  /* Round bottom if it's the last child OR precedes a separator */
+  .menu.is-sheet .menu-item:last-child,
+  .menu.is-sheet .menu-item:has(+ .menu-sep) {
+    border-bottom-left-radius: 16px;
+    border-bottom-right-radius: 16px;
+  }
+
+  /* --- Separator Gap --- */
+  .menu-sep {
+    height: 8px; 
+    background: transparent;
+  }
   body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #menu-toggle,
   body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) .topbar-center,
   body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #create-anchor,

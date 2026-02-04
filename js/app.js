@@ -658,6 +658,17 @@ function clearAndroidFullscreenParams() {
   setAndroidUrlParamState({ fullscreen: false, rotate: false });
 }
 
+function emitAndroidUiScheme(message) {
+  if (!isAndroidMode()) return;
+  const value = String(message || "").trim();
+  if (!value) return;
+  if (emitAndroidUiScheme._last === value) return;
+  emitAndroidUiScheme._last = value;
+  try {
+    window.location.href = `nostube://${value}`;
+  } catch {}
+}
+
 function syncAndroidFullscreenForRoute(route) {
   if (!isAndroidMode()) return;
   const isFs = String(route?.page || "") === "fullscreen";
@@ -2420,6 +2431,7 @@ function openMenu(menu) {
     closeAllMenusExcept(menu);
   } catch {}
   if (isMobileUi()) {
+    const hadOpen = document.body.classList.contains("is-menu-sheet-open");
     if (!openMenu._sheetBackdrop) {
       const el = document.createElement("div");
       el.className = "menu-sheet-backdrop";
@@ -2438,6 +2450,7 @@ function openMenu(menu) {
       } catch {}
     }
     document.body.classList.add("is-menu-sheet-open");
+    if (!hadOpen) emitAndroidUiScheme("ACTION_SHEET:OPEN");
 
     // Portal the menu to <body> so it can overlay everything (watch page,
     // simulated fullscreen, transformed parents, etc).
@@ -2484,6 +2497,7 @@ function closeMenu(menu) {
       const backdrop = openMenu._sheetBackdrop;
       if (backdrop) backdrop.hidden = true;
       document.body.classList.remove("is-menu-sheet-open");
+      emitAndroidUiScheme("ACTION_SHEET:CLOSED");
     }
   }
 }
@@ -5569,6 +5583,7 @@ window.addEventListener("resize", () => {
     const backdrop = openMenu._sheetBackdrop;
     if (backdrop) backdrop.hidden = true;
     document.body.classList.remove("is-menu-sheet-open");
+    emitAndroidUiScheme("ACTION_SHEET:CLOSED");
   } catch {}
 
   try {
