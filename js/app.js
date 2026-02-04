@@ -139,6 +139,7 @@ const watchShareAnchor = document.getElementById("watch-share-anchor");
 const watchShareBtn = document.getElementById("watch-share");
 const watchShareMenu = document.getElementById("watch-share-menu");
 const watchShareLink = document.getElementById("watch-share-link");
+const watchShareNative = document.getElementById("watch-share-native");
 const watchShareEmbed = document.getElementById("watch-share-embed");
 const libraryAvatar = document.getElementById("library-avatar");
 const libraryInitials = document.getElementById("library-initials");
@@ -2052,8 +2053,10 @@ if (searchForm) {
 
 const RELAYS = [
   "wss://relay.damus.io",
+  "wss://relay.coinos.io",
   "wss://nos.lol",
   "wss://relay.snort.social",
+  "wss://relay.primal.net",
   "wss://nostr.wine",
 ];
 
@@ -5836,6 +5839,47 @@ if (watchShareLink) {
       showToast("Link copied");
     } catch {
       showToast("Copy failed");
+    }
+  });
+}
+
+if (watchShareNative) {
+  watchShareNative.addEventListener("click", async () => {
+    closeAllMenus();
+    const video = getCurrentWatchVideo();
+    if (!video?.id) return;
+    const origin = window.location.origin;
+    const shareUrl = `${origin}/share/${video.id}`;
+
+    const title = String(video.title || "").trim();
+    const shareData = {
+      url: shareUrl,
+    };
+    if (title) shareData.title = title;
+
+    const canShare = Boolean(navigator.share) && (!navigator.canShare || navigator.canShare(shareData));
+    if (!canShare) {
+      try {
+        await copyText(shareUrl);
+        showToast("Link copied");
+      } catch {
+        showToast("Copy failed");
+      }
+      return;
+    }
+
+    try {
+      await navigator.share(shareData);
+    } catch (err) {
+      // User cancellation should be silent.
+      const name = String(err?.name || "");
+      if (name === "AbortError") return;
+      try {
+        await copyText(shareUrl);
+        showToast("Link copied");
+      } catch {
+        showToast("Share failed");
+      }
     }
   });
 }

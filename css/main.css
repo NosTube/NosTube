@@ -1160,16 +1160,16 @@ body.is-library-topbar .topbar-right {
   }
 
   .menu.is-sheet .menu-item:first-child {
-    border-radius: 12px 12px 4px 4px;
+    border-radius: 16px 16px 4px 4px;
   }
   .menu.is-sheet .menu-item:last-child {
-    border-radius: 4px 4px 12px 12px;
+    border-radius: 4px 4px 16px 16px;
   }
   .menu.is-sheet .menu-item:not(:first-child):not(:last-child) {
     border-radius: 4px;
   }
   .menu.is-sheet .menu-item:first-child:last-child {
-    border-radius: 12px;
+    border-radius: 16px;
   }
 
   body:not(.is-search-topbar):not(.is-deep-topbar):not(.is-library-topbar):not(.is-channel-topbar) #menu-toggle,
