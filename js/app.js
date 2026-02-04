@@ -665,7 +665,16 @@ function emitAndroidUiScheme(message) {
   if (emitAndroidUiScheme._last === value) return;
   emitAndroidUiScheme._last = value;
   try {
-    window.location.href = `nostube://${value}`;
+    const payload = `nostube://${value}`;
+    // Kodular's Web Viewer "Web View String Change" event only fires when
+    // JavaScript calls AppInventor.setWebViewString(...).
+    if (window.AppInventor && typeof window.AppInventor.setWebViewString === "function") {
+      window.AppInventor.setWebViewString(payload);
+      return;
+    }
+
+    // Fallback: attempt a custom-scheme navigation.
+    window.location.href = payload;
   } catch {}
 }
 
