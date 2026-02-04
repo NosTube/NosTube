@@ -412,10 +412,10 @@ function renderSettingsPage(route) {
               <div class="settings-row-title">Color scheme</div>
               <div class="settings-row-desc">Light / Dark / System</div>
             </div>
-            <select class="settings-select" disabled>
-              <option>System</option>
-              <option>Light</option>
-              <option>Dark</option>
+            <select class="settings-select" data-theme-select>
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
             </select>
           </div>
           <label class="settings-row settings-toggle">
@@ -441,6 +441,18 @@ function renderSettingsPage(route) {
         </div>
       </div>
     `;
+
+    const sel = settingsContent.querySelector("[data-theme-select]");
+    if (sel) {
+      try {
+        sel.value = getThemeSetting();
+      } catch {}
+      sel.addEventListener("change", () => {
+        try {
+          setThemeSetting(sel.value);
+        } catch {}
+      });
+    }
     return;
   }
 
@@ -2084,6 +2096,93 @@ const FEED_LIMIT = 64;
 const SHORTS_LIMIT = 12;
 const MAX_EVENT_AGE_DAYS = 365;
 const DEBUG_NOSTR = false;
+
+const THEME_KEY = "nostube-theme";
+let themeSettingCached = "";
+let themeEffectiveCached = "";
+let themeMediaQuery = null;
+
+function getThemeSetting() {
+  if (themeSettingCached) return themeSettingCached;
+  let raw = "";
+  try {
+    raw = String(window.localStorage.getItem(THEME_KEY) || "");
+  } catch {
+    raw = "";
+  }
+  const v = String(raw || "").toLowerCase();
+  if (v === "light" || v === "dark" || v === "system") {
+    themeSettingCached = v;
+    return v;
+  }
+  themeSettingCached = "dark";
+  return themeSettingCached;
+}
+
+function setThemeSetting(next) {
+  const v = String(next || "").toLowerCase();
+  const normalized = v === "light" || v === "dark" || v === "system" ? v : "dark";
+  themeSettingCached = normalized;
+  try {
+    window.localStorage.setItem(THEME_KEY, normalized);
+  } catch {}
+  applyTheme();
+}
+
+function computeEffectiveTheme(setting) {
+  const s = String(setting || "").toLowerCase();
+  if (s === "light" || s === "dark") return s;
+  let prefersDark = false;
+  try {
+    prefersDark = Boolean(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  } catch {}
+  return prefersDark ? "dark" : "light";
+}
+
+function applyTheme() {
+  const setting = getThemeSetting();
+  const effective = computeEffectiveTheme(setting);
+  themeEffectiveCached = effective;
+  try {
+    if (effective === "dark") document.documentElement.dataset.theme = "dark";
+    else document.documentElement.dataset.theme = "light";
+  } catch {}
+
+  try {
+    emitAndroidUiScheme(`THEME:${effective.toUpperCase()}`);
+  } catch {}
+}
+
+function initThemeController() {
+  if (!themeMediaQuery && window.matchMedia) {
+    try {
+      themeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    } catch {
+      themeMediaQuery = null;
+    }
+  }
+
+  try {
+    applyTheme();
+  } catch {}
+
+  if (themeMediaQuery && !initThemeController._wired) {
+    initThemeController._wired = true;
+    const onChange = () => {
+      if (getThemeSetting() !== "system") return;
+      const nextEffective = computeEffectiveTheme("system");
+      if (nextEffective === themeEffectiveCached) return;
+      applyTheme();
+    };
+    try {
+      themeMediaQuery.addEventListener("change", onChange);
+    } catch {
+      try {
+        themeMediaQuery.addListener(onChange);
+      } catch {}
+    }
+  }
+}
 
 let watchLoadToken = 0;
 
@@ -5495,6 +5594,10 @@ async function initNostrFeed() {
 
 try {
   initAndroidModeFlagFromUrl();
+} catch {}
+
+try {
+  initThemeController();
 } catch {}
 
 initNostrFeed();
