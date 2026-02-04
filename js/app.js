@@ -2412,19 +2412,113 @@ if (authPages) {
 
 function openMenu(menu) {
   if (!menu) return;
+  // Enforce: only one menu is open at a time.
+  try {
+    closeAllMenusExcept(menu);
+  } catch {}
+  if (isMobileUi()) {
+    if (!openMenu._sheetBackdrop) {
+      const el = document.createElement("div");
+      el.className = "menu-sheet-backdrop";
+      el.hidden = true;
+      el.addEventListener("click", () => {
+        closeAllMenus();
+      });
+      document.body.appendChild(el);
+      openMenu._sheetBackdrop = el;
+    }
+    const backdrop = openMenu._sheetBackdrop;
+    if (backdrop) {
+      backdrop.hidden = false;
+      try {
+        document.body.appendChild(backdrop);
+      } catch {}
+    }
+    document.body.classList.add("is-menu-sheet-open");
+
+    // Portal the menu to <body> so it can overlay everything (watch page,
+    // simulated fullscreen, transformed parents, etc).
+    if (!menu._sheetPortalPlaceholder) {
+      const placeholder = document.createElement("span");
+      placeholder.hidden = true;
+      placeholder.dataset.menuPortalPlaceholder = "1";
+      menu._sheetPortalPlaceholder = placeholder;
+    }
+    if (!menu._sheetPortalOriginalParent) {
+      menu._sheetPortalOriginalParent = menu.parentNode;
+    }
+    const placeholder = menu._sheetPortalPlaceholder;
+    if (menu.parentNode && placeholder && menu.parentNode !== document.body) {
+      try {
+        menu.parentNode.insertBefore(placeholder, menu);
+      } catch {}
+    }
+    if (menu.parentNode !== document.body) {
+      try {
+        document.body.appendChild(menu);
+      } catch {}
+    }
+    menu.classList.add("is-sheet");
+  }
   menu.hidden = false;
 }
 
 function closeMenu(menu) {
   if (!menu) return;
   menu.hidden = true;
+  menu.classList.remove("is-sheet");
+  if (menu._sheetPortalPlaceholder && menu._sheetPortalOriginalParent) {
+    try {
+      menu._sheetPortalOriginalParent.insertBefore(menu, menu._sheetPortalPlaceholder);
+      menu._sheetPortalPlaceholder.remove();
+    } catch {}
+    menu._sheetPortalOriginalParent = null;
+    menu._sheetPortalPlaceholder = null;
+  }
+  if (isMobileUi()) {
+    const anyOpen = Boolean(document.querySelector(".menu:not([hidden])"));
+    if (!anyOpen) {
+      const backdrop = openMenu._sheetBackdrop;
+      if (backdrop) backdrop.hidden = true;
+      document.body.classList.remove("is-menu-sheet-open");
+    }
+  }
 }
 
 function closeAllMenus() {
   closeMenu(createMenu);
   closeMenu(userMenu);
   closeMenu(channelMenu);
+  closeMenu(searchMenu);
   closeMenu(watchShareMenu);
+}
+
+function closeAllMenusExcept(exceptMenu) {
+  if (createMenu && createMenu !== exceptMenu) closeMenu(createMenu);
+  if (userMenu && userMenu !== exceptMenu) closeMenu(userMenu);
+  if (channelMenu && channelMenu !== exceptMenu) closeMenu(channelMenu);
+  if (searchMenu && searchMenu !== exceptMenu) closeMenu(searchMenu);
+  if (watchShareMenu && watchShareMenu !== exceptMenu) closeMenu(watchShareMenu);
+}
+
+function resetMenuPresentation(menu) {
+  if (!menu) return;
+  menu.classList.remove("is-up");
+  menu.classList.remove("is-sheet");
+  menu.style.position = "";
+  menu.style.left = "";
+  menu.style.right = "";
+  menu.style.top = "";
+  menu.style.bottom = "";
+  menu.style.width = "";
+  if (menu._sheetPortalPlaceholder && menu._sheetPortalOriginalParent) {
+    try {
+      menu._sheetPortalOriginalParent.insertBefore(menu, menu._sheetPortalPlaceholder);
+      menu._sheetPortalPlaceholder.remove();
+    } catch {}
+    menu._sheetPortalOriginalParent = null;
+    menu._sheetPortalPlaceholder = null;
+  }
 }
 
 function positionMenu(menu) {
@@ -2477,6 +2571,7 @@ function positionMenu(menu) {
 
 function openMenuWithPosition(menu) {
   openMenu(menu);
+  if (isMobileUi()) return;
   requestAnimationFrame(() => positionMenu(menu));
 }
 
@@ -5455,6 +5550,24 @@ window.addEventListener("resize", () => {
   const next = isMobileUi();
   if (next === _lastIsMobileUi) return;
   _lastIsMobileUi = next;
+
+  // Switching between desktop/mobile UI can leave menus in the wrong presentation
+  // mode (desktop-positioned dropdown vs. mobile sheet). Reset them completely.
+  try {
+    closeAllMenus();
+  } catch {}
+  try {
+    resetMenuPresentation(createMenu);
+    resetMenuPresentation(userMenu);
+    resetMenuPresentation(channelMenu);
+    resetMenuPresentation(watchShareMenu);
+  } catch {}
+  try {
+    const backdrop = openMenu._sheetBackdrop;
+    if (backdrop) backdrop.hidden = true;
+    document.body.classList.remove("is-menu-sheet-open");
+  } catch {}
+
   try {
     syncTopbarMode();
   } catch {}
