@@ -1367,12 +1367,12 @@ body.is-library-topbar .topbar-right {
 }
 
 .chip:hover {
-  background: color-mix(in srgb, var(--yt-text) 6%, var(--yt-chip));
+  background: #eaeaea;
 }
 
 .chip.is-active {
   background: var(--yt-chip-active);
-  color: var(--yt-on-primary);
+  color: #fff;
 }
 
 
@@ -2553,6 +2553,7 @@ body.is-sim-fullscreen .watch-controls-title {
   overflow-wrap: anywhere;
   word-break: break-word;
   max-width: 100%;
+  font-size: 14px
 }
 
 .library-meta {
@@ -2978,7 +2979,7 @@ body.sidebar-collapsed .sidebar-link {
   }
 
   .library-header {
-    padding: 24px;
+    padding: 16px 12px;
     background: var(--yt-chip);
   }
 

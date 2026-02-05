@@ -4,22 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NosTube</title>
-  <script>
-    (function () {
-      try {
-        var key = "nostube-theme";
-        var raw = String(window.localStorage.getItem(key) || "");
-        var setting = raw === "light" || raw === "dark" || raw === "system" ? raw : "dark";
-        var effective = setting;
-        if (setting === "system") {
-          effective = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        }
-        document.documentElement.setAttribute("data-theme", effective);
-      } catch (e) {
-        document.documentElement.setAttribute("data-theme", "dark");
-      }
-    })();
-  </script>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
