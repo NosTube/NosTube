@@ -5,6 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NosTube</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <script>
+    (function () {
+      try {
+        var key = "nostube-theme";
+        var raw = String(window.localStorage.getItem(key) || "").toLowerCase();
+        var setting = raw === "light" || raw === "dark" || raw === "system" ? raw : "dark";
+        var effective = setting;
+        if (setting === "system") {
+          var prefersDark = false;
+          try {
+            prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          } catch (e) {
+            prefersDark = false;
+          }
+          effective = prefersDark ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = effective === "light" ? "light" : "dark";
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
@@ -359,6 +381,12 @@
                       </button>
                       <input type="range" id="watch-volume" min="0" max="1" value="1" step="0.01" />
                       <div class="watch-controls-spacer"></div>
+                      <div class="menu-anchor player-settings-anchor" id="player-settings-anchor">
+                        <button class="watch-control-btn" id="player-settings-btn" type="button" aria-label="Player settings">
+                          <span class="material-symbols-rounded">settings</span>
+                        </button>
+                        <div class="menu" id="player-settings-menu" hidden></div>
+                      </div>
                       <button class="watch-control-btn" id="watch-fullscreen">
                         <span class="material-symbols-rounded">fullscreen</span>
                       </button>
@@ -401,6 +429,10 @@
                       <span class="material-symbols-rounded">playlist_add</span>
                       Save
                     </button>
+                    <button class="watch-action" id="watch-event" type="button">
+                      <span class="material-symbols-rounded">code</span>
+                      Event
+                    </button>
                   </div>
                   <div class="watch-channel">
                     <div class="channel-avatar">
@@ -415,6 +447,24 @@
                   </div>
                   <div class="watch-desc" id="watch-desc">
                     This video is powered by Nostr video events (NIP-71).
+                  </div>
+                  <div class="watch-event-panel" id="watch-event-panel" hidden>
+                    <div class="watch-event-panel-head">
+                      <div class="watch-event-panel-title">Event</div>
+                      <button class="icon-btn" id="watch-event-close" type="button" aria-label="Close">
+                        <span class="material-symbols-rounded">close</span>
+                      </button>
+                    </div>
+                    <div class="watch-event-panel-body">
+                      <div class="watch-event-section">
+                        <div class="watch-event-section-title">Relays</div>
+                        <div class="watch-event-relays" id="watch-event-relays"></div>
+                      </div>
+                      <div class="watch-event-section">
+                        <div class="watch-event-section-title">Raw event</div>
+                        <pre class="watch-event-raw" id="watch-event-raw"></pre>
+                      </div>
+                    </div>
                   </div>
                   <div class="watch-comments">
                     <div class="watch-comments-title">Comment</div>
@@ -435,6 +485,9 @@
         </section>
 
         <section class="page page-channel" id="page-channel">
+          <div class="channel-banner" id="channel-banner" hidden>
+            <img class="channel-banner-img" id="channel-banner-image" alt="" loading="lazy" />
+          </div>
           <div class="channel-header">
             <div class="channel-avatar large" id="channel-avatar">
               <span class="channel-initials" id="channel-initials">NT</span>

@@ -115,6 +115,7 @@ export async function onRequest(context) {
   }
 
   const parsedVideo = parseVideoEvent(videoEvent);
+  const restriction = classifyRestrictedContent(videoEvent);
 
   let publisher = "Nostr creator";
   try {
@@ -130,11 +131,12 @@ export async function onRequest(context) {
     }
   } catch {}
 
-  const title = parsedVideo.title || "NosTube video";
-  const description = publisher || "NosTube";
+  const title = restriction.restricted ? "Restricted content" : parsedVideo.title || "NosTube video";
+  const description = restriction.restricted ? "Hidden by safety settings" : publisher || "NosTube";
 
-  const hasThumb = Boolean(parsedVideo.thumb && /^https?:\/\//i.test(parsedVideo.thumb));
-  const hasVideo = isDirectMp4(parsedVideo.url, parsedVideo.mime);
+  const hasThumb =
+    !restriction.restricted && Boolean(parsedVideo.thumb && /^https?:\/\//i.test(parsedVideo.thumb));
+  const hasVideo = !restriction.restricted && isDirectMp4(parsedVideo.url, parsedVideo.mime);
 
   const image = hasThumb ? parsedVideo.thumb : "";
   const videoUrl = hasVideo ? parsedVideo.url : "";
@@ -470,6 +472,73 @@ function getTagWithMime(tags, keys) {
     if (url) return { url, mime };
   }
   return { url: "", mime: "" };
+}
+
+function getTagValues(tags, key) {
+  try {
+    return (tags || [])
+      .filter((entry) => entry && entry[0] === key && entry.length >= 2)
+      .map((entry) => String(entry[1] || ""));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeContentSignal(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9+_-]+/g, "");
+}
+
+function classifyRestrictedContent(event) {
+  const tags = event?.tags || [];
+  const content = String(event?.content || "");
+
+  const reasons = [];
+  const cwValues = getTagValues(tags, "content-warning")
+    .concat(getTagValues(tags, "content_warning"))
+    .concat(getTagValues(tags, "cw"))
+    .map(normalizeContentSignal)
+    .filter(Boolean);
+
+  if (cwValues.length) {
+    reasons.push("content-warning");
+    if (cwValues.some((v) => v === "nsfw" || v === "porn" || v === "nudity" || v === "adult" || v === "18+")) {
+      reasons.push("nsfw");
+    }
+  }
+
+  const hashtagSignals = getTagValues(tags, "t")
+    .concat(getTagValues(tags, "hashtag"))
+    .map(normalizeContentSignal)
+    .filter(Boolean);
+  const explicitSignals = new Set([
+    "nsfw",
+    "18+",
+    "adult",
+    "porn",
+    "porno",
+    "nudity",
+    "nude",
+    "sex",
+    "xxx",
+    "explicit",
+  ]);
+  if (hashtagSignals.some((v) => explicitSignals.has(v))) {
+    reasons.push("tagged-explicit");
+  }
+
+  const textSignals = content.toLowerCase();
+  if (/(^|\b)(nsfw|18\+|adult|porn|nudity|explicit|xxx)($|\b)/i.test(textSignals)) {
+    reasons.push("text-explicit");
+  }
+
+  const restricted = reasons.length > 0;
+  return {
+    restricted,
+    reason: restricted ? Array.from(new Set(reasons)).join(",") : "",
+  };
 }
 
 function parseVideoEvent(event) {
