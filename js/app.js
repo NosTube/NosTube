@@ -272,19 +272,43 @@ async function ensureWatchEventInspectorData(video) {
   const token = ++watchEventInspectToken;
   const route = getRoute();
   const queryRelays = parseRelayHints(route?.params);
-  const relays = mergeRelays(RELAYS, [], queryRelays);
+  const relays = mergeRelays(getReadRelays(), [], queryRelays);
 
   let first = null;
   const hits = [];
-  await Promise.all(
-    relays.map((relay) =>
-      requestEvents(relay, { ids: [video.id], limit: 1 }, (ev) => {
-        if (!ev?.id) return;
-        if (!first) first = ev;
-        hits.push(relay);
-      })
-    )
-  );
+  const addr = video.address ? parseAddressableVideoCoord(video.address) : parseAddressableVideoCoord(video.id);
+  if (addr) {
+    await Promise.all(
+      relays.map((relay) =>
+        requestEvents(
+          relay,
+          {
+            kinds: [addr.kind],
+            authors: [addr.pubkey],
+            "#d": [addr.identifier],
+            limit: 20,
+          },
+          (ev) => {
+            if (!ev?.id) return;
+            if (!first || Number(ev.created_at || 0) > Number(first.created_at || 0)) {
+              first = ev;
+            }
+            hits.push(relay);
+          }
+        )
+      )
+    );
+  } else {
+    await Promise.all(
+      relays.map((relay) =>
+        requestEvents(relay, { ids: [video.id], limit: 1 }, (ev) => {
+          if (!ev?.id) return;
+          if (!first) first = ev;
+          hits.push(relay);
+        })
+      )
+    );
+  }
 
   if (token !== watchEventInspectToken) return null;
   if (!first) return video;
@@ -682,53 +706,18 @@ window.addEventListener("resize", () => {
   } catch {}
 });
 
-async function ensureWatchEventInspectorData(video) {
-  if (!video?.id) return null;
-  if (video.nostrEventRaw && Array.isArray(video.nostrRelays) && video.nostrRelays.length) return video;
-
-  const token = ++watchEventInspectToken;
-  const route = getRoute();
-  const queryRelays = parseRelayHints(route?.params);
-  const relays = mergeRelays(RELAYS, [], queryRelays);
-
-  let first = null;
-  const hits = [];
-  await Promise.all(
-    relays.map((relay) =>
-      requestEvents(relay, { ids: [video.id], limit: 1 }, (ev) => {
-        if (!ev?.id) return;
-        if (!first) first = ev;
-        hits.push(relay);
-      })
-    )
-  );
-
-  if (token !== watchEventInspectToken) return null;
-  if (!first) return video;
-
-  const profile = profilesCache.get(first.pubkey) || profilesCache.get(video.pubkey) || null;
-  storeVideo(
-    {
-      ...video,
-      nostrEventRaw: first,
-      nostrRelays: Array.from(new Set(hits)),
-    },
-    profile
-  );
-  return videoStore.get(video.id) || null;
-}
-
 function renderSettingsPage(route) {
   if (!settingsContent) return;
   const section = String(route?.id || "");
   if (settingsTitle) {
-    settingsTitle.textContent = "Settings";
+    settingsTitle.textContent = section ? "Settings" : "Settings";
   }
   const sectionTitle = (key) => {
     const k = String(key || "").toLowerCase();
     if (k === "account") return "Account";
     if (k === "appearance") return "Appearance";
     if (k === "playback") return "Playback";
+    if (k === "relays") return "Relays";
     if (k === "content") return "Restricted Mode";
     if (k === "privacy") return "Privacy";
     if (k === "about") return "About";
@@ -804,6 +793,10 @@ function renderSettingsPage(route) {
         <button class="settings-item" type="button" data-settings-section="playback">
           <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">play_circle</span>
           <span class="settings-item-label">Playback</span>
+        </button>
+        <button class="settings-item" type="button" data-settings-section="relays">
+          <span class="material-symbols-rounded settings-item-icon" aria-hidden="true">dns</span>
+          <span class="settings-item-label">Relays</span>
         </button>
       </div>
 
@@ -983,6 +976,148 @@ function renderSettingsPage(route) {
         </div>
       </div>
     `;
+    return;
+  }
+
+  if (section === "relays") {
+    const settings = getRelaySettings();
+    const relays = settings.relays;
+    const rows = relays
+      .map((r, idx) => {
+        const url = escapeHtml(r.url);
+        const readChecked = r.read ? "checked" : "";
+        const writeChecked = r.write ? "checked" : "";
+        const canRemove = relays.length > 1;
+        return `
+          <div class="settings-row" data-relay-row data-relay-idx="${idx}">
+            <div class="settings-row-main">
+              <div class="settings-row-title" style="word-break: break-word;">${url}</div>
+              <div class="settings-row-desc">Choose how NosTube uses this relay.</div>
+            </div>
+            <div style="display:flex; gap: 10px; align-items:center;">
+              <label style="display:flex; gap:6px; align-items:center; font-size:12px; color: var(--yt-muted);">
+                <input type="checkbox" data-relay-read ${readChecked} />
+                Read
+              </label>
+              <label style="display:flex; gap:6px; align-items:center; font-size:12px; color: var(--yt-muted);">
+                <input type="checkbox" data-relay-write ${writeChecked} />
+                Write
+              </label>
+              <button class="text-btn" type="button" data-relay-remove ${canRemove ? "" : "disabled"}>Remove</button>
+            </div>
+          </div>
+        `;
+      })
+      .join("\n");
+
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">${escapeHtml(title)}</div>
+        <div class="settings-section-sub">Manage which Nostr relays NosTube reads from and writes to.</div>
+
+        <div class="settings-group" role="group" aria-label="Relays">
+          <div class="settings-group-title">Relays</div>
+          ${rows || ""}
+        </div>
+
+        <div class="settings-group" role="group" aria-label="Add relay">
+          <div class="settings-group-title">Add relay</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Relay URL</div>
+              <div class="settings-row-desc">Must start with ws:// or wss://</div>
+            </div>
+            <input class="settings-select" style="width: min(360px, 100%);" type="text" placeholder="wss://relay.example" data-relay-add-input />
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main"></div>
+            <div style="display:flex; gap: 10px; align-items:center;">
+              <button class="primary-btn" type="button" data-relay-add>Add</button>
+              <button class="secondary-btn" type="button" data-relay-reset>Reset to defaults</button>
+            </div>
+          </div>
+          <div class="settings-row" style="padding-top: 0;">
+            <div class="settings-row-main">
+              <div class="settings-row-desc" style="color: var(--yt-muted);">Tip: if you disable all Read relays, NosTube will fall back to defaults.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const applyAndRerender = () => {
+      initNostrFeed();
+      renderLocalPages();
+      const route = getRoute();
+      if (route.page === "channel" && route.id) showChannel(route.id);
+      if (route.page === "watch" && route.id) {
+        const v = videoStore.get(route.id);
+        if (v) showWatchForVideo(v);
+      }
+    };
+
+    settingsContent.querySelectorAll("[data-relay-row]").forEach((row) => {
+      const idx = Number(row.getAttribute("data-relay-idx"));
+      if (!Number.isFinite(idx) || idx < 0) return;
+      const readEl = row.querySelector("[data-relay-read]");
+      const writeEl = row.querySelector("[data-relay-write]");
+      const removeBtn = row.querySelector("[data-relay-remove]");
+
+      const onChange = () => {
+        const next = getRelaySettings();
+        const entry = next.relays[idx];
+        if (!entry) return;
+        entry.read = Boolean(readEl && readEl.checked);
+        entry.write = Boolean(writeEl && writeEl.checked);
+        setRelaySettings(next);
+        applyAndRerender();
+      };
+
+      if (readEl) readEl.addEventListener("change", onChange);
+      if (writeEl) writeEl.addEventListener("change", onChange);
+      if (removeBtn) {
+        removeBtn.addEventListener("click", () => {
+          const next = getRelaySettings();
+          if (next.relays.length <= 1) return;
+          next.relays.splice(idx, 1);
+          setRelaySettings(next);
+          renderSettingsPage({ page: "settings", id: "relays" });
+          applyAndRerender();
+        });
+      }
+    });
+
+    const addInput = settingsContent.querySelector("[data-relay-add-input]");
+    const addBtn = settingsContent.querySelector("[data-relay-add]");
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        const raw = String(addInput?.value || "").trim();
+        const norm = normalizeRelayUrl(raw);
+        if (!norm) {
+          showToast("Invalid relay URL");
+          return;
+        }
+        const next = getRelaySettings();
+        if (next.relays.some((r) => String(r.url) === norm)) {
+          showToast("Relay already added");
+          return;
+        }
+        next.relays.push({ url: norm, read: true, write: true });
+        setRelaySettings(next);
+        if (addInput) addInput.value = "";
+        renderSettingsPage({ page: "settings", id: "relays" });
+        applyAndRerender();
+      });
+    }
+
+    const resetBtn = settingsContent.querySelector("[data-relay-reset]");
+    if (resetBtn) {
+      resetBtn.addEventListener("click", () => {
+        setRelaySettings(getDefaultRelaySettings());
+        renderSettingsPage({ page: "settings", id: "relays" });
+        applyAndRerender();
+      });
+    }
     return;
   }
 
@@ -1667,6 +1802,7 @@ function syncTopbarMode() {
     if (k === "account") return "Account";
     if (k === "appearance") return "Appearance";
     if (k === "playback") return "Playback";
+    if (k === "relays") return "Relays";
     if (k === "privacy") return "Privacy";
     if (k === "about") return "About";
     return "Settings";
@@ -2006,13 +2142,14 @@ async function fetchNostrEventsForAuthors(kinds, authors, limit) {
   if (!filter.authors.length) return [];
   const events = new Map();
   await Promise.all(
-    RELAYS.map((relay) =>
+    getReadRelays().map((relay) =>
       requestEvents(relay, filter, (event) => {
         if (!events.has(event.id)) events.set(event.id, event);
       })
     )
   );
-  return Array.from(events.values()).sort((a, b) => b.created_at - a.created_at);
+  const sorted = Array.from(events.values()).sort((a, b) => b.created_at - a.created_at);
+  return dedupeVideoEventsByKey(sorted);
 }
 
 async function renderSubscriptionsPage() {
@@ -2288,6 +2425,13 @@ if (watchEventBtn) {
   watchEventBtn.addEventListener("click", async () => {
     const video = getCurrentWatchVideo();
     if (!video) return;
+
+    try {
+      setWatchEventInspectorOpen(true);
+      if (watchEventRelays) watchEventRelays.textContent = "Loading…";
+      if (watchEventRaw) watchEventRaw.textContent = "Loading…";
+    } catch {}
+
     let hydrated = video;
     try {
       hydrated = (await ensureWatchEventInspectorData(video)) || video;
@@ -2295,7 +2439,12 @@ if (watchEventBtn) {
     try {
       populateWatchEventInspector(hydrated);
     } catch {}
-    setWatchEventInspectorOpen(true);
+
+    if (!hydrated?.nostrEventRaw) {
+      try {
+        if (watchEventRaw) watchEventRaw.textContent = "Unable to load raw event.";
+      } catch {}
+    }
   });
 }
 
@@ -2382,19 +2531,63 @@ function normalizeHashTag(value) {
   return tag.trim();
 }
 
-function extractSearchWords(query) {
-  return String(query || "")
-    .toLowerCase()
-    .split(/\s+/)
-    .map((w) => w.trim())
-    .filter(Boolean);
+function normalizeSearchText(raw) {
+  const value = String(raw || "").toLowerCase();
+  try {
+    return value
+      .replace(/#/g, " ")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .replace(/\s+/g, " ");
+  } catch {
+    return value
+      .replace(/#/g, " ")
+      .replace(/[^a-z0-9]+/gi, " ")
+      .trim()
+      .replace(/\s+/g, " ");
+  }
 }
 
-function matchesQueryLocally(video, query) {
-  const q = String(query || "").trim().toLowerCase();
+function extractSearchWords(query) {
+  const normalized = normalizeSearchText(query);
+  if (!normalized) return [];
+  return normalized.split(" ").map((w) => w.trim()).filter(Boolean);
+}
+
+function stringifyEventTags(tags) {
+  try {
+    return (tags || [])
+      .filter((entry) => Array.isArray(entry) && entry.length)
+      .map((entry) => entry.slice(0, 12).join(" "))
+      .join(" \n");
+  } catch {
+    return "";
+  }
+}
+
+function stringifyProfileForSearch(profile) {
+  if (!profile) return "";
+  const name = String(profile.name || "");
+  const nip05 = String(profile.nip05 || "");
+  const about = String(profile.about || "");
+  const displayName = String(profile.display_name || "");
+  const username = String(profile.username || "");
+  return `${name}\n${displayName}\n${username}\n${nip05}\n${about}`;
+}
+
+function matchesQueryLocally(event, video, profile, query) {
+  const q = normalizeSearchText(query);
   if (!q) return true;
   const words = extractSearchWords(q);
-  const hay = `${video?.title || ""} ${video?.summary || ""}`.toLowerCase();
+
+  const title = String(video?.title || "");
+  const summary = String(video?.summary || "");
+  const content = String(event?.content || "");
+  const tags = stringifyEventTags(event?.tags);
+  const profileText = stringifyProfileForSearch(profile);
+  const pubkey = String(event?.pubkey || video?.pubkey || "");
+
+  const hay = normalizeSearchText(`${title}\n${summary}\n${content}\n${tags}\n${profileText}\n${pubkey}`);
   return words.every((w) => hay.includes(w));
 }
 
@@ -2407,47 +2600,66 @@ async function searchNostrVideos(query, { limit = 80 } = {}) {
   const isTagOnly = /^#\S+$/.test(q);
   const tag = isTagOnly ? normalizeHashTag(q) : "";
 
-  const primaryFilter = {
-    kinds: [21, 22],
-    limit,
-    since,
+  const kinds = [21, 22, 34235, 34236];
+  const relays = getReadRelays();
+
+  const candidates = new Map();
+  const addCandidate = (event) => {
+    if (!event?.id) return;
+    if (!candidates.has(event.id)) candidates.set(event.id, event);
   };
 
-  if (tag) {
-    primaryFilter["#t"] = [tag];
-  } else {
-    primaryFilter.search = q;
-  }
+  const fallbackLimit = Math.max(240, limit * 6);
+  const fallbackFilter = { kinds, limit: fallbackLimit, since };
 
-  const events = new Map();
-  await Promise.all(
-    RELAYS.map((relay) =>
-      requestEvents(relay, primaryFilter, (event) => {
-        if (!events.has(event.id)) events.set(event.id, event);
+  // Always fetch a recent window and filter locally so results are consistent
+  // across relays with/without NIP-50 search support.
+  const tasks = [];
+  tasks.push(
+    ...relays.map((relay) =>
+      requestEvents(relay, fallbackFilter, (event) => {
+        addCandidate(event);
       })
     )
   );
 
-  let found = Array.from(events.values()).sort((a, b) => b.created_at - a.created_at);
-
-  if (!found.length && !tag) {
-    const fallbackEvents = new Map();
-    const fallbackFilter = { kinds: [21, 22], limit: Math.max(120, limit), since };
-    await Promise.all(
-      RELAYS.map((relay) =>
-        requestEvents(relay, fallbackFilter, (event) => {
-          if (!fallbackEvents.has(event.id)) fallbackEvents.set(event.id, event);
+  // If this looks like a pure hashtag search, also do a #t filter which many relays support.
+  if (tag) {
+    const tagFilter = { kinds, limit: Math.max(120, limit * 3), since, "#t": [tag] };
+    tasks.push(
+      ...relays.map((relay) =>
+        requestEvents(relay, tagFilter, (event) => {
+          addCandidate(event);
         })
       )
     );
-    const candidate = Array.from(fallbackEvents.values()).sort((a, b) => b.created_at - a.created_at);
-    found = candidate.filter((event) => {
-      const parsed = parseVideoEvent(event);
-      return matchesQueryLocally(parsed, q);
-    });
+  } else {
+    // Opportunistic NIP-50 search. If a relay supports it, great; if not, the fallback window still works.
+    const searchFilter = { kinds, limit: Math.max(120, limit * 3), since, search: q };
+    tasks.push(
+      ...relays.map((relay) =>
+        requestEvents(relay, searchFilter, (event) => {
+          addCandidate(event);
+        })
+      )
+    );
   }
 
-  return found;
+  await Promise.all(tasks);
+  const candidateEvents = Array.from(candidates.values()).sort((a, b) => b.created_at - a.created_at);
+
+  const pubkeys = [...new Set(candidateEvents.map((e) => e.pubkey).filter(Boolean))];
+  const profiles = await fetchProfiles(pubkeys);
+  profiles.forEach((value, key) => profilesCache.set(key, value));
+
+  const matched = candidateEvents.filter((event) => {
+    const video = parseVideoEvent(event);
+    const profile = profiles.get(event.pubkey) || profilesCache.get(event.pubkey) || null;
+    return matchesQueryLocally(event, video, profile, q);
+  });
+
+  // Keep only the latest version for addressable events.
+  return dedupeVideoEventsByKey(matched).slice(0, limit);
 }
 
 function setSearchPageHeader(query) {
@@ -2516,8 +2728,9 @@ async function renderSearchPage(query) {
   }
 
   const pubkeys = [...new Set(events.map((e) => e.pubkey).filter(Boolean))];
-  const profiles = await fetchProfiles(pubkeys);
-  profiles.forEach((value, key) => profilesCache.set(key, value));
+  await ensureProfiles(pubkeys);
+  const profiles = new Map();
+  pubkeys.forEach((key) => profiles.set(key, profilesCache.get(key)));
   searchEmpty.hidden = true;
   renderVideos(searchFeed, searchEmpty, events.sort((a, b) => b.created_at - a.created_at), profiles);
 
@@ -2647,7 +2860,7 @@ if (searchForm) {
   });
 }
 
-const RELAYS = [
+const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://relay.coinos.io",
   "wss://nos.lol",
@@ -2655,6 +2868,62 @@ const RELAYS = [
   "wss://relay.primal.net",
   "wss://nostr.wine",
 ];
+
+const RELAY_SETTINGS_KEY = "nostube-relays";
+let relaySettingsCache = null;
+
+function getDefaultRelaySettings() {
+  return {
+    relays: DEFAULT_RELAYS.map((url) => ({ url, read: true, write: true })),
+  };
+}
+
+function coerceRelaySettings(raw) {
+  const out = { relays: [] };
+  const input = raw && typeof raw === "object" ? raw : {};
+  const list = Array.isArray(input.relays) ? input.relays : [];
+  const seen = new Set();
+  for (const item of list) {
+    const url = normalizeRelayUrl(item?.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.relays.push({ url, read: Boolean(item?.read), write: Boolean(item?.write) });
+  }
+  if (!out.relays.length) return getDefaultRelaySettings();
+  return out;
+}
+
+function getRelaySettings() {
+  if (relaySettingsCache) return relaySettingsCache;
+  try {
+    const raw = window.localStorage.getItem(RELAY_SETTINGS_KEY);
+    if (raw) {
+      relaySettingsCache = coerceRelaySettings(JSON.parse(raw));
+      return relaySettingsCache;
+    }
+  } catch {}
+  relaySettingsCache = getDefaultRelaySettings();
+  return relaySettingsCache;
+}
+
+function setRelaySettings(next) {
+  relaySettingsCache = coerceRelaySettings(next);
+  try {
+    window.localStorage.setItem(RELAY_SETTINGS_KEY, JSON.stringify(relaySettingsCache));
+  } catch {}
+}
+
+function getReadRelays() {
+  const settings = getRelaySettings();
+  const out = (settings.relays || []).filter((r) => r.read).map((r) => r.url);
+  return out.length ? out : DEFAULT_RELAYS.slice();
+}
+
+function getWriteRelays() {
+  const settings = getRelaySettings();
+  const out = (settings.relays || []).filter((r) => r.write).map((r) => r.url);
+  return out.length ? out : DEFAULT_RELAYS.slice();
+}
 
 const FEED_LIMIT = 64;
 const SHORTS_LIMIT = 12;
@@ -3555,7 +3824,7 @@ async function publishEventToRelay(relayUrl, event) {
 }
 
 async function publishEvent(event) {
-  const results = await Promise.allSettled(RELAYS.map((relay) => publishEventToRelay(relay, event)));
+  const results = await Promise.allSettled(getWriteRelays().map((relay) => publishEventToRelay(relay, event)));
   const ok = results.some((r) => r.status === "fulfilled");
   if (!ok) {
     const reason = results.find((r) => r.status === "rejected")?.reason?.message || "Failed to publish";
@@ -3871,7 +4140,7 @@ async function loadContacts() {
   const filter = { kinds: [3], authors: [authState.pubkey], limit: 1 };
   const found = [];
   await Promise.all(
-    RELAYS.map((relay) =>
+    getReadRelays().map((relay) =>
       requestEvents(relay, filter, (event) => {
         found.push(event);
       })
@@ -4435,25 +4704,53 @@ function mergeRelays(...relayLists) {
   return out;
 }
 
+function decodeWatchSegment(value) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function parseAddressableVideoCoord(value) {
+  const v = String(value || "").trim();
+  const m = v.match(/^(34235|34236):([0-9a-f]{64}):(.+)$/i);
+  if (!m) return null;
+  const kind = Number(m[1]);
+  const pubkey = String(m[2] || "").toLowerCase();
+  const identifier = decodeWatchSegment(m[3]);
+  if (!identifier) return null;
+  return { kind, pubkey, identifier, coord: `${kind}:${pubkey}:${identifier}` };
+}
+
 function normalizeWatchTarget(rawId) {
   const value = String(rawId || "").trim();
-  if (!value) return { id: "", relays: [] };
+  if (!value) return { id: "", relays: [], addr: null };
+
+  const addr = parseAddressableVideoCoord(value);
+  if (addr) {
+    return { id: addr.coord, relays: [], addr };
+  }
+
   const tools = getNostrTools();
   if (tools?.nip19?.decode && /^(note|nevent)1[0-9a-z]+$/i.test(value)) {
     try {
       const decoded = tools.nip19.decode(value);
       if (decoded?.type === "note") {
-        return { id: bytesToHex(decoded.data), relays: [] };
+        return { id: bytesToHex(decoded.data), relays: [], addr: null };
       }
       if (decoded?.type === "nevent") {
         return {
           id: String(decoded.data?.id || ""),
           relays: Array.isArray(decoded.data?.relays) ? decoded.data.relays : [],
+          addr: null,
         };
       }
     } catch {}
   }
-  return { id: value, relays: [] };
+  return { id: value, relays: [], addr: null };
 }
 
 async function fetchFirstEventFromRelays(relays, filter) {
@@ -4502,11 +4799,87 @@ async function ensureWatchVideoLoaded(route) {
   const token = ++watchLoadToken;
   const target = normalizeWatchTarget(route?.id);
   const queryRelays = parseRelayHints(route?.params);
-  const relays = mergeRelays(RELAYS, target.relays, queryRelays);
+  const relays = mergeRelays(getReadRelays(), target.relays, queryRelays);
 
   if (!target.id) {
     showToast("Invalid video id.");
     if (token === watchLoadToken) window.location.hash = "#home";
+    return;
+  }
+
+  if (target.addr) {
+    if (watchStatus) {
+      watchStatus.textContent = "Loading video…";
+      watchStatus.hidden = false;
+    }
+    setActivePage(pageWatch);
+    setActiveNav(getLineageMainNavKey(route));
+    updateSubscribeButton();
+    setWatchLikeUi();
+    setWatchSaveUi();
+
+    const hits = [];
+    const matches = [];
+    const filter = {
+      kinds: [target.addr.kind],
+      authors: [target.addr.pubkey],
+      "#d": [target.addr.identifier],
+      limit: 20,
+    };
+    await Promise.all(
+      relays.map((relay) =>
+        requestEvents(relay, filter, (ev) => {
+          if (!ev?.id) return;
+          matches.push(ev);
+          hits.push(relay);
+        })
+      )
+    );
+
+    if (token !== watchLoadToken) return;
+    if (!matches.length) {
+      showToast("Video not found.");
+      if (token === watchLoadToken) window.location.hash = "#home";
+      return;
+    }
+
+    matches.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const event = matches[0];
+    const foundOnRelays = Array.from(new Set(hits));
+
+    const restriction = classifyRestrictedContent(event);
+    if (restriction.restricted && !isRestrictedContentAllowed()) {
+      const blockedVideo = parseVideoEvent(event);
+      const profile =
+        profilesCache.get(event.pubkey) ||
+        (await fetchProfileFromRelays(relays, event.pubkey));
+      if (profile) profilesCache.set(event.pubkey, profile);
+      storeVideo(
+        {
+          ...blockedVideo,
+          nostrEventRaw: event,
+          nostrRelays: foundOnRelays,
+        },
+        profile
+      );
+      showWatchForVideo(videoStore.get(blockedVideo.id));
+      return;
+    }
+
+    const video = parseVideoEvent(event);
+    const profile =
+      profilesCache.get(event.pubkey) ||
+      (await fetchProfileFromRelays(relays, event.pubkey));
+    if (profile) profilesCache.set(event.pubkey, profile);
+    storeVideo(
+      {
+        ...video,
+        nostrEventRaw: event,
+        nostrRelays: foundOnRelays,
+      },
+      profile
+    );
+    showWatchForVideo(videoStore.get(video.id));
     return;
   }
 
@@ -5937,7 +6310,7 @@ function handleRoute() {
     setActivePage(pageSearch);
     setActiveNav(getLineageMainNavKey(route));
     if (!(prevRoute.page === "search" && String(prevRoute.id || "") === String(route.id || ""))) {
-      void renderSearchPage(route.id || "");
+      void renderSearchPage(decodeUriComponentSafe(route.id || ""));
     }
     return;
   }
@@ -6313,8 +6686,13 @@ function parseVideoEvent(event) {
     "";
 
   const restriction = classifyRestrictedContent(event);
+  const dTag = getTagValue(tags, "d");
+  const isAddressable = (event.kind === 34235 || event.kind === 34236) && Boolean(dTag);
+  const address = isAddressable ? `${event.kind}:${event.pubkey}:${dTag}` : "";
   return {
-    id: event.id,
+    id: address || event.id,
+    address,
+    kind: event.kind,
     pubkey: event.pubkey,
     title,
     summary,
@@ -6327,6 +6705,27 @@ function parseVideoEvent(event) {
     restricted: restriction.restricted,
     restrictedReason: restriction.reason,
   };
+}
+
+function getVideoEventKey(event) {
+  if (!event) return "";
+  if (event.kind === 34235 || event.kind === 34236) {
+    const dTag = getTagValue(event.tags || [], "d");
+    if (dTag) return `${event.kind}:${event.pubkey}:${dTag}`;
+  }
+  return String(event.id || "");
+}
+
+function dedupeVideoEventsByKey(events) {
+  const out = [];
+  const seen = new Set();
+  (events || []).forEach((event) => {
+    const key = getVideoEventKey(event);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(event);
+  });
+  return out;
 }
 
 function logEventDebug(event, extracted) {
@@ -6463,7 +6862,7 @@ async function fetchNostrEvents(kinds, limit) {
   const filter = { kinds, limit, since };
   const events = new Map();
   await Promise.all(
-    RELAYS.map((relay) =>
+    getReadRelays().map((relay) =>
       requestEvents(relay, filter, (event) => {
         if (!events.has(event.id)) {
           events.set(event.id, event);
@@ -6479,7 +6878,7 @@ async function fetchProfiles(pubkeys) {
   const profiles = new Map();
   const filter = { kinds: [0], authors: pubkeys.slice(0, 80), limit: 80 };
   await Promise.all(
-    RELAYS.map((relay) =>
+    getReadRelays().map((relay) =>
       requestEvents(relay, filter, (event) => {
         if (profiles.has(event.pubkey)) return;
         try {
@@ -6489,6 +6888,9 @@ async function fetchProfiles(pubkeys) {
             picture: data.picture || "",
             nip05: data.nip05 || "",
             banner: data.banner || data.cover || "",
+            about: data.about || "",
+            display_name: data.display_name || "",
+            username: data.username || "",
           });
         } catch (error) {
           profiles.set(event.pubkey, {
@@ -6496,6 +6898,9 @@ async function fetchProfiles(pubkeys) {
             picture: "",
             nip05: "",
             banner: "",
+            about: "",
+            display_name: "",
+            username: "",
           });
         }
       })
@@ -6581,7 +6986,7 @@ function renderVideos(container, emptyState, events, profiles) {
 
     setCardThumb(thumb, video.thumb, video.id);
 
-    if (event.kind === 21 && event.tags?.some((tag) => tag[0] === "live")) {
+    if ((event.kind === 21 || event.kind === 34235) && event.tags?.some((tag) => tag[0] === "live")) {
       live.hidden = false;
     }
 
@@ -6664,8 +7069,8 @@ async function initNostrFeed() {
   if (!recommendedFeed || !latestFeed || !shortsGrid) return;
   try {
     const [videos, shorts] = await Promise.all([
-      fetchNostrEvents([21], FEED_LIMIT * 2),
-      fetchNostrEvents([22], SHORTS_LIMIT),
+      fetchNostrEvents([21, 34235], FEED_LIMIT * 2),
+      fetchNostrEvents([22, 34236], SHORTS_LIMIT),
     ]);
     const profiles = await fetchProfiles([
       ...new Set([...videos, ...shorts].map((event) => event.pubkey)),
@@ -7080,7 +7485,7 @@ if (watchShareLink) {
     const video = getCurrentWatchVideo();
     if (!video?.id) return;
     const origin = window.location.origin;
-    const shareUrl = `${origin}/share/${video.id}`;
+    const shareUrl = `${origin}/share/${encodeURIComponent(video.id)}`;
     try {
       await copyText(shareUrl);
       showToast("Link copied");
@@ -7101,7 +7506,7 @@ if (watchShareNative) {
     const video = getCurrentWatchVideo();
     if (!video?.id) return;
     const origin = window.location.origin;
-    const shareUrl = `${origin}/share/${video.id}`;
+    const shareUrl = `${origin}/share/${encodeURIComponent(video.id)}`;
 
     const isBlocked = Boolean(video?.restricted && !isRestrictedContentAllowed());
     const title = isBlocked ? "" : String(video.title || "").trim();
@@ -7385,7 +7790,7 @@ if (watchLikeBtn) {
       const video = route.page === "watch" ? videoStore.get(route.id) : null;
       if (!video?.id) return;
       const tags = [
-        ["e", video.id],
+        video.address ? ["a", video.address] : ["e", video.id],
         ["p", video.pubkey],
       ];
       const unsigned = buildUnsignedEvent(7, "+", tags);
@@ -7412,7 +7817,7 @@ if (watchCommentSend) {
       const video = route.page === "watch" ? videoStore.get(route.id) : null;
       if (!video?.id) return;
       const tags = [
-        ["e", video.id],
+        video.address ? ["a", video.address] : ["e", video.id],
         ["p", video.pubkey],
       ];
       const unsigned = buildUnsignedEvent(1, text, tags);
