@@ -103,6 +103,25 @@
             <div class="studio-page-sub">Publish a video event to your configured relays.</div>
           </div>
           <div class="studio-card">
+            <div class="studio-subpanel">
+              <div class="studio-subpanel-title">Addressable (optional)</div>
+              <div class="studio-help">Use addressable uploads if you want to edit metadata later without changing the video link.</div>
+              <label class="checkbox-row">
+                <input type="checkbox" id="studio-editable" />
+                <span>Editable (addressable)</span>
+              </label>
+              <label class="field">
+                <span>Identifier (optional)</span>
+                <input id="studio-identifier" placeholder="video-my-identifier (d tag)" />
+              </label>
+              <label class="field">
+                <span>Edit existing (optional)</span>
+                <div class="studio-row">
+                  <input id="studio-edit-coord" placeholder="34235:&lt;pubkey&gt;:&lt;d&gt;" />
+                  <button class="secondary-btn" type="button" id="studio-load">Load</button>
+                </div>
+              </label>
+            </div>
             <label class="field">
               <span>Title</span>
               <input id="studio-title" placeholder="Video title" />
@@ -123,6 +142,76 @@
               <span>Summary (optional)</span>
               <textarea id="studio-summary" rows="3" placeholder="Describe your upload…"></textarea>
             </label>
+
+            <label class="field">
+              <span>Tags (optional)</span>
+              <div class="studio-chips" id="studio-tags">
+                <div class="studio-chiplist" id="studio-tags-list"></div>
+                <input id="studio-tags-input" name="nostube-tags" placeholder="Add tags…" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="text" />
+              </div>
+            </label>
+
+            <div class="studio-subpanel">
+              <label class="checkbox-row">
+                <input type="checkbox" id="studio-cw" />
+                <span>Content warning</span>
+              </label>
+              <div class="studio-help">Adds a content warning tag so clients can filter or gate this video.</div>
+              <div id="studio-cw-panel" hidden>
+                <div class="studio-cw-grid" id="studio-cw-reasons">
+                  <label class="studio-cw-item">
+                    <input type="checkbox" value="nsfw" />
+                    <span>NSFW</span>
+                  </label>
+                  <label class="studio-cw-item">
+                    <input type="checkbox" value="nudity" />
+                    <span>Nudity</span>
+                  </label>
+                  <label class="studio-cw-item">
+                    <input type="checkbox" value="violence" />
+                    <span>Violence</span>
+                  </label>
+                  <label class="studio-cw-item">
+                    <input type="checkbox" value="strong language" />
+                    <span>Strong language</span>
+                  </label>
+                  <label class="studio-cw-item">
+                    <input type="checkbox" value="drugs" />
+                    <span>Drugs</span>
+                  </label>
+                  <label class="studio-cw-item">
+                    <input type="checkbox" value="flashing lights" />
+                    <span>Flashing lights</span>
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>Custom warnings (optional)</span>
+                  <div class="studio-chips" id="studio-cw-custom">
+                    <div class="studio-chiplist" id="studio-cw-custom-list"></div>
+                    <input id="studio-cw-custom-input" name="nostube-content-warning" placeholder="Add a warning…" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="text" />
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="studio-subpanel">
+              <label class="checkbox-row">
+                <input type="checkbox" id="studio-advanced" />
+                <span>Advanced</span>
+              </label>
+              <div id="studio-advanced-panel" hidden>
+                <label class="checkbox-row">
+                  <input type="checkbox" id="studio-imeta" />
+                  <span>Include imeta (NIP-92)</span>
+                </label>
+                <div class="studio-help">Enable this if you want other NIP-71 clients to read the video URL, thumbnail, and duration from a single structured tag.</div>
+                <label class="field">
+                  <span>Duration seconds (optional)</span>
+                  <input id="studio-duration" placeholder="60" />
+                </label>
+              </div>
+            </div>
             <label class="field">
               <span>Type</span>
               <select id="studio-kind">
@@ -130,6 +219,15 @@
                 <option value="22">Short</option>
               </select>
             </label>
+
+            <details class="studio-inspector" id="studio-event-inspector">
+              <summary>
+                <span class="material-symbols-rounded studio-inspector-icon" aria-hidden="true">expand_more</span>
+                <span>Event inspector</span>
+              </summary>
+              <div class="studio-help">Preview of the exact unsigned event that will be signed and published.</div>
+              <pre class="studio-code" id="studio-event-preview"></pre>
+            </details>
 
             <div class="studio-actions">
               <button class="primary-btn" id="studio-publish">Publish to relays</button>
@@ -185,15 +283,17 @@
         <div class="modal-body">
           <button class="primary-btn" id="studio-auth-ext">Sign in with extension</button>
           <div class="modal-divider">or</div>
-          <label class="field">
-            <span>Nostr secret key (nsec)</span>
-            <input type="password" id="studio-auth-nsec" placeholder="nsec1…" autocomplete="off" />
-          </label>
-          <label class="checkbox-row">
-            <input type="checkbox" id="studio-auth-persist" />
-            <span>Stay signed in on this device</span>
-          </label>
-          <button class="primary-btn" id="studio-auth-nsec-btn">Sign in with nsec</button>
+          <form id="studio-auth-form" autocomplete="off" novalidate>
+            <label class="field">
+              <span>Nostr secret key (nsec)</span>
+              <input type="password" id="studio-auth-nsec" placeholder="nsec1…" autocomplete="off" />
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="studio-auth-persist" />
+              <span>Stay signed in on this device</span>
+            </label>
+            <button class="primary-btn" type="button" id="studio-auth-nsec-btn">Sign in with nsec</button>
+          </form>
           <div class="modal-divider">or</div>
           <button class="secondary-btn" id="studio-auth-signup">Sign up (generate new keys)</button>
           <div class="key-output" id="studio-auth-generated" hidden>

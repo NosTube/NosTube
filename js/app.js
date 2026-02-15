@@ -3920,6 +3920,12 @@ function updateSubscribeButton() {
   const video = route.page === "watch" ? videoStore.get(route.id) : null;
   const targetPubkey = video?.pubkey || "";
   const signedIn = Boolean(authState.pubkey);
+  const restricted = Boolean(video?.restricted) && !isRestrictedContentAllowed();
+  if (restricted) {
+    watchSubscribeBtn.disabled = true;
+    watchSubscribeBtn.textContent = "Subscribe";
+    return;
+  }
   if (!signedIn || !targetPubkey || targetPubkey === authState.pubkey) {
     watchSubscribeBtn.disabled = !signedIn || !targetPubkey || targetPubkey === authState.pubkey;
   } else {
@@ -7841,6 +7847,7 @@ if (watchSubscribeBtn) {
       }
       const route = getRoute();
       const video = route.page === "watch" ? videoStore.get(route.id) : null;
+      if (video?.restricted && !isRestrictedContentAllowed()) return;
       const target = video?.pubkey || "";
       if (!target || target === authState.pubkey) return;
 
