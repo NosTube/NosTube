@@ -84,13 +84,20 @@
           <div class="studio-page-head">
             <h1>Channel content</h1>
             <div class="studio-tabs">
-              <button class="studio-tab is-active" type="button">Videos</button>
-              <button class="studio-tab" type="button" disabled>Shorts</button>
+              <button class="studio-tab is-active" type="button" id="studio-content-tab-videos">Videos</button>
+              <button class="studio-tab" type="button" id="studio-content-tab-shorts">Shorts</button>
               <button class="studio-tab" type="button" disabled>Live</button>
             </div>
           </div>
           <div class="studio-card">
-            <div class="feed-empty">No content available yet.</div>
+            <div class="studio-content" id="studio-content-videos">
+              <div class="studio-list" id="studio-content-videos-list"></div>
+              <div class="feed-empty" id="studio-content-videos-empty">Loading videos…</div>
+            </div>
+            <div class="studio-content" id="studio-content-shorts" hidden>
+              <div class="studio-list" id="studio-content-shorts-list"></div>
+              <div class="feed-empty" id="studio-content-shorts-empty">Loading shorts…</div>
+            </div>
             <div class="studio-actions">
               <a class="primary-btn" href="#upload">Upload videos</a>
             </div>

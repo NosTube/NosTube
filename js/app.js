@@ -54,6 +54,7 @@ const watchStats = document.getElementById("watch-stats");
 const watchDesc = document.getElementById("watch-desc");
 const watchChannelName = document.getElementById("watch-channel-name");
 const watchChannelMeta = document.getElementById("watch-channel-meta");
+const watchCommentsTitle = document.querySelector(".watch-comments-title");
 const watchChannelInitials = document.getElementById("watch-channel-initials");
 const watchChannelImage = document.getElementById("watch-channel-image");
 const watchChannelAvatar = watchChannelImage ? watchChannelImage.closest(".channel-avatar") : null;
@@ -87,6 +88,21 @@ const channelTitle = document.getElementById("channel-title");
 const channelMeta = document.getElementById("channel-meta");
 const channelFeed = document.getElementById("feed-channel");
 const channelEmpty = document.getElementById("feed-channel-empty");
+const channelTabs = document.getElementById("channel-tabs");
+const channelTabVideos = document.getElementById("channel-tab-videos");
+const channelTabShorts = document.getElementById("channel-tab-shorts");
+const channelTabLive = document.getElementById("channel-tab-live");
+const channelTabAbout = document.getElementById("channel-tab-about");
+const channelPanelVideos = document.getElementById("channel-panel-videos");
+const channelPanelShorts = document.getElementById("channel-panel-shorts");
+const channelPanelLive = document.getElementById("channel-panel-live");
+const channelPanelAbout = document.getElementById("channel-panel-about");
+const channelShortsGrid = document.getElementById("channel-shorts-grid");
+const channelShortsEmpty = document.getElementById("channel-shorts-empty");
+const channelLiveEmpty = document.getElementById("channel-live-empty");
+const channelLiveFeed = document.getElementById("feed-channel-live");
+const channelAbout = document.getElementById("channel-about");
+const channelAboutEmpty = document.getElementById("channel-about-empty");
 const userAvatar = document.getElementById("user-avatar");
 const userAvatarLabel = document.getElementById("user-avatar-label");
 const createBtn = document.getElementById("create-btn");
@@ -132,6 +148,10 @@ const watchSaveBtn = document.getElementById("watch-save");
 const watchCommentInput = document.getElementById("watch-comment-input");
 const watchCommentSend = document.getElementById("watch-comment-send");
 const watchCommentsNote = document.getElementById("watch-comments-note");
+const watchCommentsList = document.getElementById("watch-comments-list");
+const watchCommentsEmpty = document.getElementById("watch-comments-empty");
+
+if (watchCommentInput) bindAutoResizeTextarea(watchCommentInput, 180);
 const sidebarSubsList = document.getElementById("sidebar-subs-list");
 const sidebarSubsEmpty = document.getElementById("sidebar-subs-empty");
 const toastEl = document.getElementById("toast");
@@ -153,6 +173,11 @@ const watchEventPanel = document.getElementById("watch-event-panel");
 const watchEventClose = document.getElementById("watch-event-close");
 const watchEventRelays = document.getElementById("watch-event-relays");
 const watchEventRaw = document.getElementById("watch-event-raw");
+const channelEventBtn = document.getElementById("channel-event");
+const channelEventPanel = document.getElementById("channel-event-panel");
+const channelEventClose = document.getElementById("channel-event-close");
+const channelEventRelays = document.getElementById("channel-event-relays");
+const channelEventRaw = document.getElementById("channel-event-raw");
 const libraryAvatar = document.getElementById("library-avatar");
 const libraryInitials = document.getElementById("library-initials");
 const libraryImage = document.getElementById("library-image");
@@ -184,6 +209,7 @@ const likedList = document.getElementById("feed-liked");
 const likedEmpty = document.getElementById("feed-liked-empty");
 let watchHls = null;
 const videoStore = new Map();
+const channelProfileFetchState = new Map();
 let isScrubbingProgress = false;
 let lastVolume = 1;
 let lastWatchedVideoId = "";
@@ -223,6 +249,177 @@ let miniResumeVideoId = "";
 let suppressWatchAutoplayOnce = false;
 let pendingMiniAfterFullscreenExit = false;
 let watchLoadedVideoId = "";
+let watchLastLoadUrl = "";
+let watchLastLoadMime = "";
+let watchLastIsHls = false;
+let watchCommentsPollTimer = 0;
+let watchCommentsPollKey = "";
+let watchCommentsCacheKey = "";
+let watchCommentsCacheById = new Map();
+let watchRenderedCommentIds = new Set();
+let watchRenderedCommentMaxCreatedAt = 0;
+let watchCommentsLoadToken = 0;
+let watchHlsRetryAt = 0;
+let watchHlsRetryCount = 0;
+let watchAutoplayWanted = false;
+let watchAutoplayRetryTimer = 0;
+let watchAutoplayRetryAttempts = 0;
+let watchUserLikeEventId = "";
+let watchUserLikeRelayHint = "";
+let watchUserDislikeEventId = "";
+let watchUserDislikeRelayHint = "";
+
+ function parseAddressableCoord(coord) {
+   const raw = String(coord || "");
+   const parts = raw.split(":");
+   if (parts.length < 3) return null;
+   const kind = Number(parts[0]);
+   const pubkey = String(parts[1] || "");
+   const d = parts.slice(2).join(":");
+   if (!Number.isFinite(kind) || !pubkey || !d) return null;
+   return { kind, pubkey, d };
+ }
+
+function insertWatchCommentNodeNewestFirst(node) {
+  try {
+    if (!watchCommentsList || !node) return;
+    const ts = Number(node?.dataset?.commentCreatedAt || 0);
+    const children = Array.from(watchCommentsList.children || []);
+    for (const child of children) {
+      const cts = Number(child?.dataset?.commentCreatedAt || 0);
+      if (ts && cts && ts > cts) {
+        watchCommentsList.insertBefore(node, child);
+        return;
+      }
+    }
+    watchCommentsList.appendChild(node);
+  } catch {
+    try {
+      watchCommentsList.appendChild(node);
+    } catch {}
+  }
+}
+
+ function getNip22ReplyParentId(ev) {
+   try {
+     const tags = Array.isArray(ev?.tags) ? ev.tags : [];
+     const isReplyMarker = (t) => {
+       const a = String(t?.[3] || "").toLowerCase();
+       const b = String(t?.[4] || "").toLowerCase();
+       return a === "reply" || b === "reply";
+     };
+     const reply = tags.find(
+       (t) => Array.isArray(t) && (t[0] === "e" || t[0] === "E") && t[1] && isReplyMarker(t)
+     );
+
+      if (reply && reply[1]) return String(reply[1]);
+
+      const eTags = tags.filter((t) => Array.isArray(t) && (t[0] === "e" || t[0] === "E") && t[1]);
+      if (eTags.length === 1) return String(eTags[0][1]);
+      if (eTags.length >= 2) return String(eTags[eTags.length - 1][1]);
+    } catch {}
+    return "";
+  }
+
+function maybeAutoPlayWatchVideo() {
+  try {
+    if (!watchVideo) return;
+    if (!watchAutoplayWanted) return;
+    if (!watchVideo.paused && !watchVideo.ended) return;
+    watchVideo.play().catch(() => {});
+  } catch {}
+}
+
+function stopWatchAutoplayRetryLoop() {
+  if (!watchAutoplayRetryTimer) return;
+  try {
+    window.clearInterval(watchAutoplayRetryTimer);
+  } catch {}
+  watchAutoplayRetryTimer = 0;
+  watchAutoplayRetryAttempts = 0;
+}
+
+function startWatchAutoplayRetryLoop() {
+  if (!watchAutoplayWanted) return;
+  if (!watchVideo) return;
+  if (watchAutoplayRetryTimer) return;
+  watchAutoplayRetryAttempts = 0;
+  watchAutoplayRetryTimer = window.setInterval(() => {
+    try {
+      if (!watchAutoplayWanted) {
+        stopWatchAutoplayRetryLoop();
+        return;
+      }
+      if (!watchVideo) {
+        stopWatchAutoplayRetryLoop();
+        return;
+      }
+      if (!watchVideo.paused && !watchVideo.ended) {
+        stopWatchAutoplayRetryLoop();
+        return;
+      }
+      watchAutoplayRetryAttempts += 1;
+      maybeAutoPlayWatchVideo();
+      if (watchAutoplayRetryAttempts >= 12) {
+        stopWatchAutoplayRetryLoop();
+      }
+    } catch {
+      stopWatchAutoplayRetryLoop();
+    }
+  }, 700);
+}
+
+function setCommentReactionChip(btn, iconName, count) {
+  if (!btn) return;
+  const n = Number(count || 0);
+  const icon = btn.querySelector(".material-symbols-rounded") || null;
+  btn.textContent = n > 0 ? String(n) : "";
+  if (icon) {
+    icon.textContent = iconName;
+    btn.prepend(icon);
+  }
+}
+
+function decodeNprofileToPubkeySafe(value) {
+  try {
+    const raw = String(value || "").trim();
+    if (!/^nprofile1[0-9a-z]+$/i.test(raw)) return "";
+    const tools = getNostrTools();
+    if (!tools?.nip19?.decode) return "";
+    const decoded = tools.nip19.decode(raw);
+    if (!decoded || decoded.type !== "nprofile") return "";
+    const pk = String(decoded.data?.pubkey || "");
+    return pk && /^[0-9a-f]{64}$/i.test(pk) ? pk : "";
+  } catch {
+    return "";
+  }
+}
+
+function autoResizeTextarea(el, maxHeight) {
+  if (!el) return;
+  try {
+    const maxH = Number(maxHeight || 0);
+    el.style.height = "auto";
+    const next = el.scrollHeight || 0;
+    if (maxH > 0 && next > maxH) {
+      el.style.height = `${maxH}px`;
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = `${next}px`;
+      el.style.overflowY = "hidden";
+    }
+  } catch {}
+}
+
+function bindAutoResizeTextarea(el, maxHeight) {
+  if (!el) return;
+  try {
+    const onInput = () => autoResizeTextarea(el, maxHeight);
+    el.addEventListener("input", onInput);
+    requestAnimationFrame(() => autoResizeTextarea(el, maxHeight));
+  } catch {}
+}
+
 let simFullscreenRotateWanted = false;
 let mainNavHasHomeBase = false;
 let homeResetInProgress = false;
@@ -254,6 +451,707 @@ function initAndroidModeFlagFromUrl() {
     isAndroidModeCached = window.localStorage.getItem(ANDROID_MODE_KEY) === "1";
   } catch {
     isAndroidModeCached = false;
+  }
+}
+
+function setChannelTab(key) {
+  const next = key === "shorts" || key === "about" || key === "live" ? key : "videos";
+  currentChannelTabKey = next;
+  if (channelTabVideos) channelTabVideos.classList.toggle("is-active", next === "videos");
+  if (channelTabShorts) channelTabShorts.classList.toggle("is-active", next === "shorts");
+  if (channelTabLive) channelTabLive.classList.toggle("is-active", next === "live");
+  if (channelTabAbout) channelTabAbout.classList.toggle("is-active", next === "about");
+  if (channelPanelVideos) channelPanelVideos.hidden = next !== "videos";
+  if (channelPanelShorts) channelPanelShorts.hidden = next !== "shorts";
+  if (channelPanelLive) channelPanelLive.hidden = next !== "live";
+  if (channelPanelAbout) channelPanelAbout.hidden = next !== "about";
+
+  if (next === "live" && currentChannelPubkey) {
+    const token = channelRenderToken;
+    try {
+      renderChannelLive(currentChannelPubkey);
+    } catch {}
+    Promise.resolve()
+      .then(() => ensureChannelLiveEventsLoaded(currentChannelPubkey, token))
+      .then(() => {
+        if (token !== channelRenderToken) return;
+        try {
+          renderChannelLive(currentChannelPubkey);
+        } catch {}
+      })
+      .catch(() => {});
+  }
+
+  if (next === "about" && currentChannelPubkey) {
+    const token = channelRenderToken;
+    const pk = String(currentChannelPubkey || "");
+    if (!pk) return;
+    const existing = channelProfileFetchState.get(pk) || { inFlight: null, hasFetched: false };
+    if (!existing.inFlight && !profilesCache.has(pk)) {
+      let resolveDone = null;
+      const inFlight = new Promise((resolve) => {
+        resolveDone = resolve;
+      });
+      channelProfileFetchState.set(pk, { ...existing, inFlight });
+      ensureProfiles([pk])
+        .catch(() => {})
+        .finally(() => {
+          const st = channelProfileFetchState.get(pk) || {};
+          channelProfileFetchState.set(pk, { ...st, inFlight: null, hasFetched: true });
+          try {
+            resolveDone?.();
+          } catch {}
+          if (token !== channelRenderToken) return;
+          try {
+            renderChannelHeader(pk, token);
+          } catch {}
+          try {
+            renderChannelPanelsFromStore(pk);
+          } catch {}
+        });
+    }
+  }
+}
+
+function renderChannelShorts(pubkey) {
+  if (!channelShortsGrid || !channelShortsEmpty) return;
+  const targetPubkey = String(pubkey || "");
+  const st = channelFetchState.get(targetPubkey) || {};
+  const isLoading = Boolean(st.inFlight);
+  const hasFetched = Boolean(st.hasFetched);
+  const shorts = Array.from(videoStore.values()).filter(
+    (video) => video.pubkey === targetPubkey && (video.kind === 22 || video.kind === 34236)
+  );
+  const allowRestricted = isRestrictedContentAllowed();
+  const visible = shorts.filter((video) => !(video.restricted && !allowRestricted));
+  channelShortsGrid.innerHTML = "";
+  if (!visible.length) {
+    channelShortsEmpty.textContent = isLoading || !hasFetched
+      ? "Loading shorts…"
+      : shorts.length && !allowRestricted
+        ? "Shorts hidden by safety settings."
+        : "No shorts for this channel yet.";
+    channelShortsEmpty.hidden = false;
+    return;
+  }
+  channelShortsEmpty.hidden = true;
+  visible
+    .sort((a, b) => Number(b.published || 0) - Number(a.published || 0))
+    .forEach((video) => {
+      const clone = shortTemplate.content.cloneNode(true);
+      const card = clone.querySelector(".short-card");
+      const thumb = clone.querySelector(".short-thumb");
+      const title = clone.querySelector(".short-title");
+      const meta = clone.querySelector(".short-meta");
+
+      title.textContent = video.title;
+      meta.textContent = video.channel || "Nostr creator";
+      setCardThumb(thumb, video.thumb, video.id);
+      card.dataset.videoId = video.id;
+      card.dataset.videoTitle = video.title;
+      card.dataset.videoChannel = video.channel || "Nostr creator";
+      card.dataset.videoTime = timeAgo(video.published);
+      card.dataset.videoSummary = video.summary || "";
+      card.dataset.videoThumb = video.thumb || "";
+      card.dataset.videoUrl = video.url || "";
+      card.dataset.videoMime = video.mime || "";
+      card.dataset.videoPicture = video.picture || "";
+      card.dataset.videoNip05 = video.nip05 || "";
+      card.dataset.videoPubkey = video.pubkey || "";
+      channelShortsGrid.appendChild(clone);
+    });
+}
+
+let watchCommentReactionsById = new Map();
+
+async function loadWatchCommentReactions(commentEvents, relays) {
+  const comments = Array.isArray(commentEvents) ? commentEvents : [];
+  const ids = comments.map((ev) => String(ev?.id || "")).filter(Boolean);
+  if (!ids.length) {
+    watchCommentReactionsById = new Map();
+    return;
+  }
+
+  const collected = new Map();
+  await Promise.all(
+    (relays || []).map((relay) =>
+      requestEvents(relay, { kinds: [7], "#e": ids, limit: 800 }, (ev) => {
+        if (!ev?.id) return;
+        if (!collected.has(ev.id)) collected.set(ev.id, { ev, relay });
+      })
+    )
+  );
+
+  const byTarget = new Map();
+  for (const { ev, relay } of collected.values()) {
+    const target = (ev.tags || []).filter((t) => Array.isArray(t) && t[0] === "e" && t[1]).slice(-1)[0]?.[1];
+    const targetId = String(target || "");
+    if (!targetId) continue;
+    const content = String(ev.content || "").trim();
+    const author = String(ev.pubkey || "");
+    if (!author) continue;
+
+    if (!byTarget.has(targetId)) {
+      byTarget.set(targetId, {
+        likesByPubkey: new Set(),
+        dislikesByPubkey: new Set(),
+        likedByMe: false,
+        dislikedByMe: false,
+        userLikeEventId: "",
+        userLikeRelayHint: "",
+        userDislikeEventId: "",
+        userDislikeRelayHint: "",
+      });
+    }
+    const entry = byTarget.get(targetId);
+    if (content === "-" && entry) {
+      entry.dislikesByPubkey.add(author);
+    } else if (content === "+" || content === "") {
+      entry.likesByPubkey.add(author);
+    }
+
+    if (authState.pubkey && author === authState.pubkey && entry) {
+      if (content === "-" && !entry.userDislikeEventId) {
+        entry.dislikedByMe = true;
+        entry.userDislikeEventId = String(ev.id || "");
+        entry.userDislikeRelayHint = String(relay || "");
+      }
+      if ((content === "+" || content === "") && !entry.userLikeEventId) {
+        entry.likedByMe = true;
+        entry.userLikeEventId = String(ev.id || "");
+        entry.userLikeRelayHint = String(relay || "");
+      }
+    }
+  }
+
+  const next = new Map();
+  ids.forEach((id) => {
+    const entry = byTarget.get(id);
+    if (!entry) {
+      next.set(id, { likes: 0, dislikes: 0, likedByMe: false, dislikedByMe: false });
+      return;
+    }
+    next.set(id, {
+      likes: entry.likesByPubkey.size,
+      dislikes: entry.dislikesByPubkey.size,
+      likedByMe: Boolean(entry.likedByMe),
+      dislikedByMe: Boolean(entry.dislikedByMe),
+      userLikeEventId: entry.userLikeEventId,
+      userLikeRelayHint: entry.userLikeRelayHint,
+      userDislikeEventId: entry.userDislikeEventId,
+      userDislikeRelayHint: entry.userDislikeRelayHint,
+    });
+  });
+  watchCommentReactionsById = next;
+}
+
+function buildUnsignedVideoCommentReply1111(video, parentCommentEvent, text) {
+  const content = String(text || "").trim();
+  if (!content) return null;
+  if (!video?.id) return null;
+  const relayHint = getPreferredRelayHint();
+  const rootKind = String(video.kind || "");
+  const rootPubkey = String(video.pubkey || "");
+  const tags = [];
+
+  // Root scope
+  if (video.address) {
+    tags.push(["A", video.address, relayHint]);
+  } else {
+    tags.push(["E", video.id, relayHint, rootPubkey]);
+  }
+  tags.push(["K", rootKind]);
+  if (rootPubkey) tags.push(["P", rootPubkey, relayHint]);
+
+  // Parent chain: include root + reply markers (NIP-10-style), so threading is reliable.
+  if (video.address) {
+    tags.push(["a", video.address, relayHint, "root"]);
+    const rootId = String(video?.nostrEventRaw?.id || "");
+    if (rootId) tags.push(["e", rootId, relayHint, rootPubkey, "root"]);
+    tags.push(["k", rootKind]);
+    if (rootPubkey) tags.push(["p", rootPubkey, relayHint]);
+  } else {
+    tags.push(["e", video.id, relayHint, rootPubkey, "root"]);
+    tags.push(["k", rootKind]);
+    if (rootPubkey) tags.push(["p", rootPubkey, relayHint]);
+  }
+
+  // Parent scope: reply to the parent comment
+  const parentId = String(parentCommentEvent?.id || "");
+  const parentPubkey = String(parentCommentEvent?.pubkey || "");
+  const parentKind = String(parentCommentEvent?.kind || "");
+  if (!parentId) return null;
+  tags.push(["e", parentId, relayHint, parentPubkey, "reply"]);
+  if (parentKind) tags.push(["k", parentKind]);
+  if (parentPubkey) tags.push(["p", parentPubkey, relayHint]);
+
+  return buildUnsignedEvent(1111, content, tags);
+}
+
+function renderChannelLive(pubkey) {
+  if (!channelLiveFeed || !channelLiveEmpty) return;
+  const targetPubkey = String(pubkey || "");
+  const allowRestricted = isRestrictedContentAllowed();
+  const st = channelLiveFetchState.get(targetPubkey) || {};
+  const isLoading = Boolean(st.inFlight);
+  const hasFetched = Boolean(st.hasFetched);
+
+  const liveVideoItems = Array.from(videoStore.values()).filter((video) => {
+    if (video.pubkey !== targetPubkey) return false;
+    if (!(video.kind === 21 || video.kind === 34235)) return false;
+    if (!(video.nostrEventRaw?.tags || []).some((tag) => tag && tag[0] === "live")) return false;
+    if (video.restricted && !allowRestricted) return false;
+    return true;
+  });
+
+  const liveEvents = Array.isArray(channelLiveEventStore.get(targetPubkey))
+    ? channelLiveEventStore.get(targetPubkey)
+    : [];
+
+  channelLiveFeed.innerHTML = "";
+  if (!liveVideoItems.length && !liveEvents.length) {
+    channelLiveEmpty.textContent = isLoading || !hasFetched
+      ? "Loading live streams…"
+      : "No live streams for this channel yet.";
+    channelLiveEmpty.hidden = false;
+    return;
+  }
+  channelLiveEmpty.hidden = true;
+
+  liveEvents
+    .slice()
+    .sort((a, b) => Number(b.published || 0) - Number(a.published || 0))
+    .forEach((live) => {
+      const clone = videoTemplate.content.cloneNode(true);
+      const card = clone.querySelector(".video-card");
+      const thumb = clone.querySelector(".thumbnail");
+      const duration = clone.querySelector(".duration");
+      const title = clone.querySelector(".video-title");
+      const channel = clone.querySelector(".video-channel");
+      const time = clone.querySelector(".video-time");
+      const livePill = clone.querySelector(".live-pill");
+      const avatar = clone.querySelector(".channel-avatar");
+      const verified = clone.querySelector(".verified");
+
+      title.textContent = live.title;
+      channel.textContent = "Live";
+      time.textContent = live.starts ? timeAgo(live.starts) : timeAgo(live.published);
+      duration.hidden = true;
+      if (livePill) {
+        livePill.hidden = false;
+        const status = String(live.status || "").toLowerCase();
+        const isEnded = status === "ended";
+        livePill.textContent = isEnded ? "ENDED" : "LIVE";
+        livePill.classList.toggle("is-ended", isEnded);
+      }
+      if (verified) verified.hidden = true;
+
+      setCardThumb(thumb, live.image, live.id);
+      try {
+        hydrateAvatar(avatar, profilesCache.get(targetPubkey) || { name: "Live", picture: "" });
+      } catch {}
+
+      card.dataset.videoId = live.address || live.id;
+      card.dataset.videoTitle = live.title;
+      card.dataset.videoChannel = "Live";
+      card.dataset.videoTime = live.starts ? timeAgo(live.starts) : timeAgo(live.published);
+      card.dataset.videoSummary = live.summary || "";
+      card.dataset.videoThumb = live.image || "";
+      card.dataset.videoUrl = pickLive30311Url({
+        status: live.status,
+        streaming: live.streaming,
+        recording: live.recording,
+      });
+      card.dataset.videoMime = "";
+      card.dataset.videoPicture = (profilesCache.get(targetPubkey) || {}).picture || "";
+      card.dataset.videoNip05 = (profilesCache.get(targetPubkey) || {}).nip05 || "";
+      card.dataset.videoPubkey = targetPubkey;
+
+      // If this stream was published by a service account but hosted by this channel,
+      // keep navigation targeting the current channel.
+      try {
+        if (live?.pubkey && String(live.pubkey) !== String(targetPubkey)) {
+          card.dataset.videoPubkey = targetPubkey;
+        }
+      } catch {}
+
+      channelLiveFeed.appendChild(clone);
+    });
+
+  liveVideoItems
+    .slice()
+    .sort((a, b) => Number(b.published || 0) - Number(a.published || 0))
+    .forEach((video) => {
+      const clone = videoTemplate.content.cloneNode(true);
+      const card = clone.querySelector(".video-card");
+      const thumb = clone.querySelector(".thumbnail");
+      const duration = clone.querySelector(".duration");
+      const title = clone.querySelector(".video-title");
+      const channel = clone.querySelector(".video-channel");
+      const time = clone.querySelector(".video-time");
+      const live = clone.querySelector(".live-pill");
+      const avatar = clone.querySelector(".channel-avatar");
+      const verified = clone.querySelector(".verified");
+
+      title.textContent = video.title;
+      channel.textContent = video.channel || "Nostr creator";
+      time.textContent = timeAgo(video.published);
+      duration.textContent = video.duration || "";
+      duration.hidden = true;
+      live.hidden = false;
+      if (verified) verified.hidden = true;
+
+      setCardThumb(thumb, video.thumb, video.id);
+      try {
+        hydrateAvatar(avatar, { name: video.channel, picture: video.picture });
+      } catch {}
+
+      card.dataset.videoId = video.id;
+      card.dataset.videoTitle = video.title;
+      card.dataset.videoChannel = video.channel || "Nostr creator";
+      card.dataset.videoTime = timeAgo(video.published);
+      card.dataset.videoSummary = video.summary || "";
+      card.dataset.videoThumb = video.thumb || "";
+      card.dataset.videoUrl = video.url || "";
+      card.dataset.videoMime = video.mime || "";
+      card.dataset.videoPicture = video.picture || "";
+      card.dataset.videoNip05 = video.nip05 || "";
+      card.dataset.videoPubkey = video.pubkey || "";
+
+      channelLiveFeed.appendChild(clone);
+    });
+}
+
+async function ensureChannelVideosLoaded(pubkey, token) {
+  const targetPubkey = String(pubkey || "");
+  if (!targetPubkey) return;
+  const now = Date.now();
+  const existingState = channelFetchState.get(targetPubkey) || { inFlight: null, lastFetchAt: 0 };
+  if (existingState.inFlight) return existingState.inFlight;
+  if (existingState.lastFetchAt && now - existingState.lastFetchAt < 30_000) {
+    if (!existingState.hasFetched) {
+      channelFetchState.set(targetPubkey, { ...existingState, hasFetched: true });
+    }
+    return;
+  }
+
+  let resolveDone = null;
+  const inFlight = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+  channelFetchState.set(targetPubkey, { ...existingState, inFlight });
+
+  let fetchedCount = 0;
+  try {
+    const events = await fetchNostrEventsForAuthors(
+      [21, 22, 34235, 34236],
+      [targetPubkey],
+      FEED_LIMIT * 4
+    );
+    if (token !== channelRenderToken) return;
+    fetchedCount = Array.isArray(events) ? events.length : 0;
+    if (!events.length) return;
+    await ensureProfiles([targetPubkey]);
+    const profile = profilesCache.get(targetPubkey) || null;
+    events.forEach((ev) => {
+      try {
+        const parsed = parseVideoEvent(ev);
+        const existed = videoStore.has(parsed.id);
+        storeVideo(
+          {
+            ...parsed,
+            nostrEventRaw: ev,
+            nostrRelays: [],
+          },
+          profile
+        );
+        if (!existed) {
+          const st = channelFetchState.get(targetPubkey) || {};
+          channelFetchState.set(targetPubkey, { ...st, hasNew: true });
+        }
+      } catch {}
+    });
+  } catch {}
+  finally {
+    const st = channelFetchState.get(targetPubkey) || {};
+    channelFetchState.set(targetPubkey, {
+      ...st,
+      inFlight: null,
+      hasFetched: true,
+      lastFetchAt: fetchedCount ? now : 0,
+    });
+    try {
+      resolveDone?.();
+    } catch {}
+  }
+}
+
+function renderChannelPanelsFromStore(pubkey) {
+  if (!channelFeed || !channelEmpty) return;
+  const targetPubkey = String(pubkey || "");
+  if (!targetPubkey) return;
+
+  const st = channelFetchState.get(targetPubkey) || {};
+  const isLoading = Boolean(st.inFlight);
+  const hasFetched = Boolean(st.hasFetched);
+
+  channelFeed.innerHTML = "";
+  const { visible } = computeChannelFlags(targetPubkey);
+  const visibleVideos = visible.filter((video) => video.kind === 21 || video.kind === 34235);
+
+  applyChannelTabVisibility(targetPubkey);
+  setChannelTab(currentChannelTabKey || "videos");
+
+  if (!visibleVideos.length) {
+    channelEmpty.textContent = isLoading || !hasFetched
+      ? "Loading videos…"
+      : "No videos for this channel yet.";
+    channelEmpty.hidden = false;
+  } else {
+    channelEmpty.hidden = true;
+    visibleVideos.forEach((video) => {
+      const clone = videoTemplate.content.cloneNode(true);
+      const card = clone.querySelector(".video-card");
+      const thumb = clone.querySelector(".thumbnail");
+      const duration = clone.querySelector(".duration");
+      const title = clone.querySelector(".video-title");
+      const channel = clone.querySelector(".video-channel");
+      const time = clone.querySelector(".video-time");
+      const avatar = clone.querySelector(".channel-avatar");
+      const avatarImg = clone.querySelector(".avatar-img");
+      const avatarInitials = clone.querySelector(".channel-initials");
+      const verified = clone.querySelector(".verified");
+      const live = clone.querySelector(".live-pill");
+
+      title.textContent = video.title;
+      channel.textContent = video.channel || "Nostr creator";
+      time.textContent = timeAgo(video.published);
+      duration.textContent = video.duration || "";
+      duration.hidden = !video.duration;
+      live.hidden = true;
+
+      if (verified) verified.hidden = true;
+      try {
+        hydrateAvatar(avatar, {
+          name: video.channel,
+          picture: video.picture,
+        });
+      } catch {}
+      setCardThumb(thumb, video.thumb, video.id);
+
+      card.dataset.videoId = video.id;
+      card.dataset.videoTitle = video.title;
+      card.dataset.videoChannel = video.channel || "Nostr creator";
+      card.dataset.videoTime = timeAgo(video.published);
+      card.dataset.videoSummary = video.summary || "";
+      card.dataset.videoThumb = video.thumb || "";
+      card.dataset.videoUrl = video.url || "";
+      card.dataset.videoMime = video.mime || "";
+      card.dataset.videoPicture = video.picture || "";
+      card.dataset.videoNip05 = video.nip05 || "";
+      card.dataset.videoPubkey = video.pubkey || "";
+
+      channelFeed.appendChild(clone);
+    });
+  }
+
+  renderChannelShorts(targetPubkey);
+  renderChannelLive(targetPubkey);
+  updateChannelActions(targetPubkey);
+}
+
+function computeChannelFlags(pubkey) {
+  const targetPubkey = String(pubkey || "");
+  const all = Array.from(videoStore.values()).filter((video) => video.pubkey === targetPubkey);
+  const hasShortsAll = all.some((video) => video.kind === 22 || video.kind === 34236);
+  const allowRestricted = isRestrictedContentAllowed();
+  const visible = all.filter((video) => !(video.restricted && !allowRestricted));
+  const hasShortsVisible = visible.some((video) => video.kind === 22 || video.kind === 34236);
+  return { all, visible, hasShortsAll, hasShortsVisible };
+}
+
+function applyChannelTabVisibility(pubkey) {
+  const aboutText = String((profilesCache.get(String(pubkey || "")) || {}).about || "").trim();
+  if (channelAboutEmpty) {
+    const st = channelProfileFetchState.get(String(pubkey || "")) || {};
+    const isLoading = Boolean(st.inFlight);
+    const hasFetched = Boolean(st.hasFetched);
+    channelAboutEmpty.textContent = isLoading || !hasFetched ? "Loading…" : "No about info yet.";
+    channelAboutEmpty.hidden = Boolean(aboutText);
+  }
+  if (channelLiveEmpty) channelLiveEmpty.textContent = "No live streams for this channel yet.";
+  if (channelTabs) channelTabs.hidden = false;
+}
+
+function getTagValueFromEvent(event, key) {
+  try {
+    const tags = event?.tags || [];
+    const tag = tags.find((t) => t && t[0] === key);
+    return tag ? String(tag[1] || "") : "";
+  } catch {
+    return "";
+  }
+}
+
+function parseLiveEvent30311(event) {
+  const title = getTagValueFromEvent(event, "title") || getTagValueFromEvent(event, "name") || "Live stream";
+  const summary = getTagValueFromEvent(event, "summary") || getTagValueFromEvent(event, "description") || "";
+  const image = getTagValueFromEvent(event, "image") || getTagValueFromEvent(event, "thumb") || "";
+  const streaming = getTagValueFromEvent(event, "streaming") || getTagValueFromEvent(event, "url") || "";
+  const recording = getTagValueFromEvent(event, "recording") || "";
+  const alt = getTagValueFromEvent(event, "alt") || "";
+  const status = getTagValueFromEvent(event, "status") || "";
+  const identifier = getTagValueFromEvent(event, "d") || "";
+  const starts = Number(getTagValueFromEvent(event, "starts") || 0);
+  const ends = Number(getTagValueFromEvent(event, "ends") || 0);
+  const published = Number(event?.created_at || 0);
+  const pubkey = String(event?.pubkey || "");
+  const address = identifier ? `30311:${pubkey}:${identifier}` : "";
+  return {
+    id: String(event?.id || ""),
+    pubkey,
+    title,
+    summary,
+    image,
+    streaming,
+    recording,
+    alt,
+    status,
+    identifier,
+    address,
+    starts,
+    ends,
+    published,
+    nostrEventRaw: event,
+  };
+}
+
+function getFirstHttpUrlFromText(text) {
+  const value = String(text || "");
+  const match = value.match(/https?:\/\/\S+/i);
+  return match ? String(match[0] || "").trim() : "";
+}
+
+function isPlayableMediaUrl(url) {
+  const value = String(url || "").trim();
+  if (!value) return false;
+  const lower = value.toLowerCase();
+  if (!/^(https?:|ipfs:)/i.test(lower)) return false;
+  if (lower.includes(".m3u8")) return true;
+  if (lower.includes(".mpd")) return true;
+  if (lower.endsWith(".mp4")) return true;
+  if (lower.endsWith(".webm")) return true;
+  if (lower.endsWith(".mov")) return true;
+  if (lower.endsWith(".m4v")) return true;
+  if (lower.endsWith(".mkv")) return true;
+  return false;
+}
+
+function pickLive30311Url({ status = "", streaming = "", recording = "" } = {}) {
+  const st = String(status || "").toLowerCase();
+  const streamUrl = String(streaming || "").trim();
+  const recUrl = String(recording || "").trim();
+  if (st === "ended") {
+    if (isPlayableMediaUrl(recUrl)) return recUrl;
+    if (isPlayableMediaUrl(streamUrl)) return streamUrl;
+    return "";
+  }
+  if (isPlayableMediaUrl(streamUrl)) return streamUrl;
+  if (isPlayableMediaUrl(recUrl)) return recUrl;
+  return "";
+}
+
+function isDisplayableLive30311FromTags(
+  { status = "", streaming = "", recording = "", alt = "" } = {},
+  { allowExternal = true } = {}
+) {
+  const playable = pickLive30311Url({ status, streaming, recording });
+  if (playable) return true;
+  if (!allowExternal) return false;
+  const altUrl = getFirstHttpUrlFromText(alt);
+  return Boolean(altUrl);
+}
+
+async function ensureChannelLiveEventsLoaded(pubkey, token) {
+  const targetPubkey = String(pubkey || "");
+  if (!targetPubkey) return;
+  const now = Date.now();
+  const existing = channelLiveFetchState.get(targetPubkey) || { inFlight: null, lastFetchAt: 0, hasFetched: false };
+  if (existing.inFlight) return existing.inFlight;
+  const hasFetched = Boolean(existing.hasFetched);
+  if (hasFetched && existing.lastFetchAt && now - existing.lastFetchAt < 30_000) return;
+  let resolveDone = null;
+  const inFlight = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+  channelLiveFetchState.set(targetPubkey, { ...existing, inFlight });
+
+  let fetchedCount = 0;
+  try {
+    const events = await fetchNostrEventsForAuthors([30311], [targetPubkey], 50);
+    if (token !== channelRenderToken) return;
+    fetchedCount = Array.isArray(events) ? events.length : 0;
+
+    // Also include streams where this channel is listed as a host.
+    const hosted = new Map();
+    try {
+      const hostCollected = new Map();
+      const hostFilter = { kinds: [30311], "#p": [targetPubkey], limit: 100 };
+      await Promise.all(
+        getReadRelays().map((relay) =>
+          requestEvents(relay, hostFilter, (ev) => {
+            if (ev?.id && !hostCollected.has(ev.id)) hostCollected.set(ev.id, ev);
+          })
+        )
+      );
+      for (const ev of hostCollected.values()) {
+        try {
+          const tmp = { kind: 30311, nostrEventRaw: ev };
+          const hostPk = getLiveHostPubkeyFrom30311(tmp);
+          if (!hostPk || hostPk !== targetPubkey) continue;
+          hosted.set(String(ev.id), ev);
+        } catch {}
+      }
+    } catch {}
+
+    const latestByKey = new Map();
+    (events || []).concat(Array.from(hosted.values())).forEach((ev) => {
+      try {
+        const live = parseLiveEvent30311(ev);
+        if (!live) return;
+        if (!isDisplayableLive30311FromTags({
+          status: live.status,
+          streaming: live.streaming,
+          recording: live.recording,
+          alt: live.alt,
+        })) {
+          return;
+        }
+
+        const d = String(live.identifier || "").trim();
+        const key = d ? `${live.pubkey}:${d}` : String(live.id);
+        const existingLive = latestByKey.get(key);
+        if (!existingLive || Number(live.published || 0) > Number(existingLive.published || 0)) {
+          latestByKey.set(key, live);
+        }
+      } catch {}
+    });
+
+    channelLiveEventStore.set(targetPubkey, Array.from(latestByKey.values()));
+    const st = channelLiveFetchState.get(targetPubkey) || {};
+    channelLiveFetchState.set(targetPubkey, { ...st, hasNew: true });
+  } catch {}
+  finally {
+    const st = channelLiveFetchState.get(targetPubkey) || {};
+    channelLiveFetchState.set(targetPubkey, {
+      ...st,
+      inFlight: null,
+      hasFetched: true,
+      lastFetchAt: fetchedCount ? now : 0,
+    });
+    try {
+      resolveDone?.();
+    } catch {}
   }
 }
 
@@ -1325,6 +2223,23 @@ function getCurrentVideoAspect() {
   return 0;
 }
 
+function parseZapReceiptDetails(ev) {
+  try {
+    const tags = Array.isArray(ev?.tags) ? ev.tags : [];
+    const raw = String(getTagValue(tags, "description") || "").trim();
+    if (!raw) return { senderPubkey: "", message: "" };
+    const data = JSON.parse(raw);
+    const senderPubkey = String(data?.pubkey || "").trim();
+    const message = String(data?.content || "").trim();
+    return {
+      senderPubkey: /^[0-9a-f]{64}$/i.test(senderPubkey) ? senderPubkey : "",
+      message,
+    };
+  } catch {
+    return { senderPubkey: "", message: "" };
+  }
+}
+
 function setAndroidUrlParamState(next) {
   if (!isAndroidMode()) return;
   try {
@@ -1670,8 +2585,14 @@ function navToMain(key) {
 const STORAGE_HISTORY = "nostube-history";
 const STORAGE_WATCHLATER = "nostube-watchlater";
 const STORAGE_LIKED = "nostube-liked";
+const STORAGE_DISLIKED = "nostube-disliked";
 let channelRenderToken = 0;
 let currentChannelPubkey = "";
+let currentChannelTabKey = "videos";
+
+const channelFetchState = new Map();
+const channelLiveFetchState = new Map();
+const channelLiveEventStore = new Map();
 
 const AUTH_STORAGE_KEY = "nostube-auth";
 const SESSION_SECRET_KEY = "nostube-nsec";
@@ -2103,14 +3024,171 @@ function handleDockPointerEnd(event, direction) {
 
 function setWatchLikeUi() {
   if (!watchLikeBtn) return;
-  const route = getRoute();
-  const video = route.page === "watch" ? videoStore.get(route.id) : null;
+  const video = getCurrentWatchVideo();
   if (!video?.id) {
     watchLikeBtn.disabled = true;
     return;
   }
-  watchLikeBtn.disabled = !authState.pubkey;
+  watchLikeBtn.disabled = false;
   watchLikeBtn.classList.toggle("is-active", hasInIdList(STORAGE_LIKED, video.id));
+}
+
+function setWatchDislikeUi() {
+  if (!watchDislikeBtn) return;
+  const video = getCurrentWatchVideo();
+  if (!video?.id) {
+    watchDislikeBtn.disabled = true;
+    return;
+  }
+  watchDislikeBtn.disabled = false;
+  watchDislikeBtn.classList.toggle("is-active", hasInIdList(STORAGE_DISLIKED, video.id));
+}
+
+async function ensureWatchReactionState(video) {
+  if (!watchLikeBtn && !watchDislikeBtn) return;
+  if (!authState.pubkey) {
+    watchUserLikeEventId = "";
+    watchUserLikeRelayHint = "";
+    watchUserDislikeEventId = "";
+    watchUserDislikeRelayHint = "";
+    setWatchLikeUi();
+    setWatchDislikeUi();
+    return;
+  }
+  if (!video?.id) return;
+  try {
+    const relays = mergeRelays(getReadRelays(), parseRelayHints(getRoute()?.params));
+    const filter = video.address
+      ? { kinds: [7], authors: [authState.pubkey], "#a": [video.address], limit: 50 }
+      : { kinds: [7], authors: [authState.pubkey], "#e": [video.id], limit: 50 };
+
+    let liked = false;
+    let disliked = false;
+    let likeId = "";
+    let likeRelayHint = "";
+    let dislikeId = "";
+    let dislikeRelayHint = "";
+
+    await Promise.all(
+      relays.map((relay) =>
+        requestEvents(relay, filter, (ev) => {
+          if (!ev?.id) return;
+          const c = String(ev.content || "").trim();
+          if (c === "+" || c === "") {
+            liked = true;
+            likeId = likeId || String(ev.id || "");
+            likeRelayHint = likeRelayHint || String(relay || "");
+          } else if (c === "-") {
+            disliked = true;
+            dislikeId = dislikeId || String(ev.id || "");
+            dislikeRelayHint = dislikeRelayHint || String(relay || "");
+          }
+        })
+      )
+    );
+
+    if (liked && !hasInIdList(STORAGE_LIKED, video.id)) addToIdList(STORAGE_LIKED, video.id, 500);
+    if (!liked && hasInIdList(STORAGE_LIKED, video.id)) removeFromIdList(STORAGE_LIKED, video.id);
+
+    if (disliked && !hasInIdList(STORAGE_DISLIKED, video.id)) addToIdList(STORAGE_DISLIKED, video.id, 500);
+    if (!disliked && hasInIdList(STORAGE_DISLIKED, video.id)) removeFromIdList(STORAGE_DISLIKED, video.id);
+
+    watchUserLikeEventId = likeId;
+    watchUserLikeRelayHint = likeRelayHint;
+    watchUserDislikeEventId = dislikeId;
+    watchUserDislikeRelayHint = dislikeRelayHint;
+    setWatchLikeUi();
+    setWatchDislikeUi();
+  } catch {
+    setWatchLikeUi();
+    setWatchDislikeUi();
+  }
+}
+
+async function deleteWatchReaction(kind7EventId, relayHint) {
+  const id = String(kind7EventId || "");
+  if (!id) return false;
+  const hint = String(relayHint || getPreferredRelayHint() || "");
+  const delTags = [["e", id, hint], ["k", "7"]];
+  const unsigned = buildUnsignedEvent(5, "", delTags);
+  const signed = await signEvent(unsigned);
+  await publishEvent(signed);
+  return true;
+}
+
+function getPreferredRelayHint() {
+  try {
+    const relays = getReadRelays();
+    if (Array.isArray(relays) && relays.length) return String(relays[0] || "");
+  } catch {}
+  return "";
+}
+
+function buildUnsignedVideoComment1111(video, text) {
+  const content = String(text || "").trim();
+  if (!content) return null;
+  const relayHint = getPreferredRelayHint();
+  const rootKind = String(video.kind || "");
+  const rootPubkey = String(video.pubkey || "");
+  const tags = [];
+
+  if (video.address) {
+    // Root scope
+    tags.push(["A", video.address, relayHint]);
+    tags.push(["K", rootKind]);
+    if (rootPubkey) tags.push(["P", rootPubkey, relayHint]);
+
+    // Parent (top-level comment, so parent is root)
+    tags.push(["a", video.address, relayHint]);
+    const rootId = String(video?.nostrEventRaw?.id || "");
+    if (rootId) tags.push(["e", rootId, relayHint, rootPubkey]);
+    tags.push(["k", rootKind]);
+    if (rootPubkey) tags.push(["p", rootPubkey, relayHint]);
+  } else {
+    // Root scope
+    tags.push(["E", video.id, relayHint, rootPubkey]);
+    tags.push(["K", rootKind]);
+    if (rootPubkey) tags.push(["P", rootPubkey, relayHint]);
+
+    // Parent (top-level comment, so parent is root)
+    tags.push(["e", video.id, relayHint, rootPubkey]);
+    tags.push(["k", rootKind]);
+    if (rootPubkey) tags.push(["p", rootPubkey, relayHint]);
+  }
+
+  return buildUnsignedEvent(1111, content, tags);
+}
+
+let watchListFetchInFlight = null;
+async function ensureWatchListHasCandidates(activeId) {
+  if (!activeId) return;
+  const existingCandidates = Array.from(videoStore.values()).filter((video) => video.id && video.id !== activeId);
+  if (existingCandidates.length) return;
+  if (watchListFetchInFlight) return watchListFetchInFlight;
+
+  watchListFetchInFlight = Promise.resolve()
+    .then(async () => {
+      const events = await fetchNostrEvents([21, 34235, 34236], FEED_LIMIT * 2);
+      const pubkeys = [...new Set((events || []).map((e) => e.pubkey).filter(Boolean))];
+      if (pubkeys.length) {
+        try {
+          await ensureProfiles(pubkeys);
+        } catch {}
+      }
+      (events || []).forEach((ev) => {
+        try {
+          const v = parseVideoEvent(ev);
+          const profile = profilesCache.get(ev.pubkey) || null;
+          storeVideo({ ...v, nostrEventRaw: ev, nostrRelays: [] }, profile);
+        } catch {}
+      });
+    })
+    .catch(() => {})
+    .finally(() => {
+      watchListFetchInFlight = null;
+    });
+
+  return watchListFetchInFlight;
 }
 
 function setWatchSaveUi() {
@@ -2128,17 +3206,21 @@ function setWatchSaveUi() {
 function getCurrentWatchVideo() {
   const route = getRoute();
   if (route.page !== "watch" && route.page !== "fullscreen") return null;
-  return videoStore.get(route.id) || null;
+  return videoStore.get(route.id) || videoStore.get(watchLoadedVideoId) || null;
 }
 
 async function fetchNostrEventsForAuthors(kinds, authors, limit) {
-  const since = Math.floor(Date.now() / 1000) - MAX_EVENT_AGE_DAYS * 86400;
+  const normalizedKinds = Array.isArray(kinds) ? kinds.filter((k) => Number.isFinite(Number(k))) : [];
+  const omitSince = normalizedKinds.includes(30311);
+  const since = omitSince ? 0 : Math.floor(Date.now() / 1000) - MAX_EVENT_AGE_DAYS * 86400;
   const filter = {
-    kinds,
+    kinds: normalizedKinds,
     authors: (authors || []).filter(Boolean).slice(0, 80),
     limit,
-    since,
   };
+  if (!omitSince) {
+    filter.since = since;
+  }
   if (!filter.authors.length) return [];
   const events = new Map();
   await Promise.all(
@@ -2380,8 +3462,29 @@ function renderLocalList(container, emptyEl, ids, options) {
     const avatar = clone.querySelector(".channel-avatar");
     const verified = clone.querySelector(".verified");
 
+    let displayPk = String(video.pubkey || "");
+    let displayName = String(video.channel || "");
+    let displayPicture = String(video.picture || "");
+    let displayNip05 = String(video.nip05 || "");
+    try {
+      const hostPk = String(video.liveHostPubkey || "").trim();
+      if (hostPk) {
+        displayPk = hostPk;
+        const hostProfile = profilesCache.get(hostPk) || null;
+        if (hostProfile) {
+          displayName = String(hostProfile?.name || "").trim() || shortenKey(hostPk);
+          displayPicture = String(hostProfile?.picture || "");
+          displayNip05 = String(hostProfile?.nip05 || "");
+        } else {
+          displayName = shortenKey(hostPk);
+          displayPicture = "";
+          displayNip05 = "";
+        }
+      }
+    } catch {}
+
     title.textContent = video.title;
-    channel.textContent = video.channel;
+    channel.textContent = displayName || video.channel;
     time.textContent = timeAgo(video.published);
     duration.textContent = video.duration || "0:00";
     if (!video.durationSeconds) {
@@ -2389,10 +3492,10 @@ function renderLocalList(container, emptyEl, ids, options) {
     }
     setCardThumb(thumb, video.thumb, video.id);
     hydrateAvatar(avatar, {
-      name: video.channel,
-      picture: video.picture,
+      name: displayName || video.channel,
+      picture: displayPicture || "",
     });
-    if (!video.nip05) {
+    if (!displayNip05) {
       verified.hidden = true;
     }
     card.dataset.videoId = video.id;
@@ -2403,9 +3506,9 @@ function renderLocalList(container, emptyEl, ids, options) {
     card.dataset.videoThumb = video.thumb || "";
     card.dataset.videoUrl = video.url || "";
     card.dataset.videoMime = video.mime || "";
-    card.dataset.videoPicture = video.picture || "";
-    card.dataset.videoNip05 = video.nip05 || "";
-    card.dataset.videoPubkey = video.pubkey || "";
+    card.dataset.videoPicture = displayPicture || "";
+    card.dataset.videoNip05 = displayNip05 || "";
+    card.dataset.videoPubkey = displayPk || "";
     container.appendChild(clone);
   });
 }
@@ -2451,6 +3554,101 @@ if (watchEventBtn) {
 if (watchEventClose) {
   watchEventClose.addEventListener("click", () => {
     setWatchEventInspectorOpen(false);
+  });
+}
+
+function setChannelEventInspectorOpen(open) {
+  if (!channelEventPanel) return;
+  channelEventPanel.hidden = !open;
+}
+
+async function fetchChannelProfileEvent(pubkey) {
+  const target = String(pubkey || "").trim();
+  if (!target) return null;
+  const collected = new Map();
+  const filter = { kinds: [0], authors: [target], limit: 1 };
+  await Promise.all(
+    getReadRelays().map((relay) =>
+      requestEvents(relay, filter, (event) => {
+        if (!event?.id) return;
+        if (!collected.has(event.id)) collected.set(event.id, { event, relays: new Set([relay]) });
+        else {
+          try {
+            collected.get(event.id)?.relays?.add?.(relay);
+          } catch {}
+        }
+      })
+    )
+  );
+  const first = Array.from(collected.values())[0] || null;
+  return first;
+}
+
+function populateChannelEventInspector(data) {
+  if (!channelEventRelays || !channelEventRaw) return;
+  channelEventRelays.innerHTML = "";
+  const relays = Array.isArray(data?.relays)
+    ? data.relays
+    : Array.from(data?.relays || []).filter(Boolean);
+  if (relays.length) {
+    relays.forEach((relay) => {
+      const url = String(relay || "").trim();
+      if (!url) return;
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = url;
+      channelEventRelays.appendChild(a);
+      channelEventRelays.appendChild(document.createTextNode("\n"));
+    });
+  } else {
+    channelEventRelays.textContent = "No relay info.";
+  }
+
+  const raw = data?.event;
+  if (raw && typeof raw === "object") {
+    try {
+      channelEventRaw.textContent = JSON.stringify(raw, null, 2);
+    } catch {
+      channelEventRaw.textContent = String(raw);
+    }
+  } else {
+    channelEventRaw.textContent = "No raw event.";
+  }
+}
+
+if (channelEventBtn) {
+  channelEventBtn.addEventListener("click", async () => {
+    const route = getRoute();
+    const pk = String(route?.id || "").trim();
+    if (!pk) return;
+
+    try {
+      setChannelEventInspectorOpen(true);
+      if (channelEventRelays) channelEventRelays.textContent = "Loading…";
+      if (channelEventRaw) channelEventRaw.textContent = "Loading…";
+    } catch {}
+
+    let data = null;
+    try {
+      data = await fetchChannelProfileEvent(pk);
+    } catch {}
+    try {
+      populateChannelEventInspector(data);
+    } catch {}
+
+    if (!data?.event) {
+      try {
+        if (channelEventRaw) channelEventRaw.textContent = "Unable to load raw event.";
+      } catch {}
+    }
+  });
+}
+
+if (channelEventClose) {
+  channelEventClose.addEventListener("click", () => {
+    setChannelEventInspectorOpen(false);
   });
 }
 
@@ -2600,7 +3798,7 @@ async function searchNostrVideos(query, { limit = 80 } = {}) {
   const isTagOnly = /^#\S+$/.test(q);
   const tag = isTagOnly ? normalizeHashTag(q) : "";
 
-  const kinds = [21, 22, 34235, 34236];
+  const kinds = [21, 22, 34235, 34236, 30311];
   const relays = getReadRelays();
 
   const candidates = new Map();
@@ -2610,7 +3808,10 @@ async function searchNostrVideos(query, { limit = 80 } = {}) {
   };
 
   const fallbackLimit = Math.max(240, limit * 6);
-  const fallbackFilter = { kinds, limit: fallbackLimit, since };
+  const fallbackFilter = { kinds, limit: fallbackLimit };
+  if (!kinds.includes(30311)) {
+    fallbackFilter.since = since;
+  }
 
   // Always fetch a recent window and filter locally so results are consistent
   // across relays with/without NIP-50 search support.
@@ -2625,7 +3826,10 @@ async function searchNostrVideos(query, { limit = 80 } = {}) {
 
   // If this looks like a pure hashtag search, also do a #t filter which many relays support.
   if (tag) {
-    const tagFilter = { kinds, limit: Math.max(120, limit * 3), since, "#t": [tag] };
+    const tagFilter = { kinds, limit: Math.max(120, limit * 3), "#t": [tag] };
+    if (!kinds.includes(30311)) {
+      tagFilter.since = since;
+    }
     tasks.push(
       ...relays.map((relay) =>
         requestEvents(relay, tagFilter, (event) => {
@@ -2635,7 +3839,10 @@ async function searchNostrVideos(query, { limit = 80 } = {}) {
     );
   } else {
     // Opportunistic NIP-50 search. If a relay supports it, great; if not, the fallback window still works.
-    const searchFilter = { kinds, limit: Math.max(120, limit * 3), since, search: q };
+    const searchFilter = { kinds, limit: Math.max(120, limit * 3), search: q };
+    if (!kinds.includes(30311)) {
+      searchFilter.since = since;
+    }
     tasks.push(
       ...relays.map((relay) =>
         requestEvents(relay, searchFilter, (event) => {
@@ -2655,6 +3862,17 @@ async function searchNostrVideos(query, { limit = 80 } = {}) {
   const matched = candidateEvents.filter((event) => {
     const video = parseVideoEvent(event);
     const profile = profiles.get(event.pubkey) || profilesCache.get(event.pubkey) || null;
+    if (event?.kind === 30311) {
+      return (
+        isDisplayableLive30311FromTags({
+          status: video.liveStatus,
+          streaming: video.liveStreaming,
+          recording: video.liveRecording,
+          alt: video.liveAlt,
+        }) &&
+        matchesQueryLocally(event, video, profile, q)
+      );
+    }
     return matchesQueryLocally(event, video, profile, q);
   });
 
@@ -3052,6 +4270,166 @@ function getNostrTools() {
   const tools = window.NostrTools || window.nostrTools || null;
   if (!tools) return null;
   return tools;
+}
+
+function decodeNpubToPubkeySafe(value) {
+  try {
+    const raw = String(value || "").trim();
+    if (!/^npub1[0-9a-z]+$/i.test(raw)) return "";
+    const tools = getNostrTools();
+    if (!tools?.nip19?.decode) return "";
+    const decoded = tools.nip19.decode(raw);
+    if (!decoded || decoded.type !== "npub") return "";
+    return String(decoded.data || "");
+  } catch {
+    return "";
+  }
+}
+
+function formatNpubShort(pubkey) {
+  const npub = pubkeyToNpubSafe(pubkey);
+  if (npub) return shortenNpub(npub);
+  return shortenKey(String(pubkey || ""));
+}
+
+function parseTimestampToSeconds(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return -1;
+  const parts = s.split(":");
+  if (parts.length < 2 || parts.length > 3) return -1;
+  const nums = parts.map((p) => Number(p));
+  if (nums.some((n) => !Number.isFinite(n) || n < 0)) return -1;
+  if (parts.length === 2) {
+    const [m, sec] = nums;
+    if (sec >= 60) return -1;
+    return m * 60 + sec;
+  }
+  const [h, m, sec] = nums;
+  if (m >= 60 || sec >= 60) return -1;
+  return h * 3600 + m * 60 + sec;
+}
+
+function extractMentionPubkeysFromText(content) {
+  const text = String(content || "");
+  const out = new Set();
+  const re = /(nostr:)?(npub1[0-9a-z]+|nprofile1[0-9a-z]+)/gi;
+  let m = null;
+  while ((m = re.exec(text))) {
+    const code = String(m[2] || "");
+    const pk = /^nprofile1/i.test(code) ? decodeNprofileToPubkeySafe(code) : decodeNpubToPubkeySafe(code);
+    if (pk) out.add(pk);
+  }
+  return Array.from(out.values());
+}
+
+function renderCommentRichText(container, content, opts) {
+  if (!container) return;
+  container.innerHTML = "";
+  const text = String(content || "");
+  if (!text) return;
+
+  const duration = Number.isFinite(opts?.duration) ? Number(opts.duration) : 0;
+  const profiles = opts?.profiles || null;
+  const enableTimestamps = opts?.enableTimestamps !== false;
+
+  const tokenRe = enableTimestamps
+    ? /(nostr:(?:npub1|nprofile1)[0-9a-z]+|\b(?:npub1|nprofile1)[0-9a-z]+\b|\b\d{1,2}:\d{2}(?::\d{2})?\b)/gi
+    : /(nostr:(?:npub1|nprofile1)[0-9a-z]+|\b(?:npub1|nprofile1)[0-9a-z]+\b)/gi;
+  let last = 0;
+  let match = null;
+  while ((match = tokenRe.exec(text))) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (start > last) {
+      container.appendChild(document.createTextNode(text.slice(last, start)));
+    }
+
+    const token = String(match[0] || "");
+    if (/^(nostr:)?(npub1|nprofile1)/i.test(token)) {
+      const code = token.replace(/^nostr:/i, "");
+      const pk = /^nprofile1/i.test(code) ? decodeNprofileToPubkeySafe(code) : decodeNpubToPubkeySafe(code);
+      const prevChar = start > 0 ? text[start - 1] : "";
+      const nextChar = end < text.length ? text[end] : "";
+      const nextNextChar = end + 1 < text.length ? text[end + 1] : "";
+      const prevPrevChar = start - 2 >= 0 ? text[start - 2] : "";
+      const prevBad = /[0-9a-z_/-]/i.test(prevChar) || (prevChar === "." && /[0-9a-z]/i.test(prevPrevChar));
+      const nextBad =
+        /[0-9a-z_/-]/i.test(nextChar) ||
+        (nextChar === "/") ||
+        (nextChar === "." && /[0-9a-z]/i.test(nextNextChar));
+      const badBoundary = prevBad || nextBad;
+      if (!pk || badBoundary) {
+        container.appendChild(document.createTextNode(token));
+      } else {
+        const link = document.createElement("a");
+        link.href = `#channel/${pk}`;
+        link.className = "watch-comment-link";
+        const prof = profiles?.get?.(pk) || profilesCache.get(pk) || null;
+        const display = String(prof?.name || "").trim();
+        link.textContent = display ? `@${display}` : `@${formatNpubShort(pk)}`;
+        container.appendChild(link);
+      }
+    } else if (enableTimestamps && /^\d/.test(token)) {
+      const seconds = parseTimestampToSeconds(token);
+      if (seconds >= 0 && duration > 0 && seconds <= duration) {
+        const link = document.createElement("a");
+        link.href = "#";
+        link.className = "watch-comment-link";
+        link.textContent = token;
+        link.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          if (!watchVideo) return;
+          const d = Number.isFinite(watchVideo.duration) ? watchVideo.duration : 0;
+          if (!d || seconds > d) return;
+          try {
+            watchVideo.currentTime = seconds;
+            updateWatchProgress();
+          } catch {}
+        });
+        container.appendChild(link);
+      } else {
+        container.appendChild(document.createTextNode(token));
+      }
+    } else {
+      container.appendChild(document.createTextNode(token));
+    }
+    last = end;
+  }
+  if (last < text.length) {
+    container.appendChild(document.createTextNode(text.slice(last)));
+  }
+}
+
+function renderMentionsOnly(container, content, profiles) {
+  try {
+    renderCommentRichText(container, content, { duration: 0, profiles, enableTimestamps: false });
+  } catch {
+    if (container) container.textContent = String(content || "");
+  }
+}
+
+function parseZapReceiptAmountSats(ev) {
+  try {
+    const tags = Array.isArray(ev?.tags) ? ev.tags : [];
+    const msat = Number(getTagValue(tags, "amount")) || 0;
+    if (msat > 0) return Math.floor(msat / 1000);
+    const bolt11 = String(getTagValue(tags, "bolt11") || "").trim();
+    if (bolt11) {
+      const m = /^ln[a-z0-9]+?(\d+)([munp])?1/i.exec(bolt11);
+      if (m) {
+        const n = Number(m[1] || 0);
+        if (!n) return 0;
+        const unit = String(m[2] || "").toLowerCase();
+        const satsPerBtc = 100_000_000;
+        if (!unit) return Math.floor(n * satsPerBtc);
+        if (unit === "m") return Math.floor(n * satsPerBtc * 1e-3);
+        if (unit === "u") return Math.floor(n * satsPerBtc * 1e-6);
+        if (unit === "n") return Math.floor(n * satsPerBtc * 1e-9);
+        if (unit === "p") return Math.floor(n * satsPerBtc * 1e-12);
+      }
+    }
+  } catch {}
+  return 0;
 }
 
 function bytesToHex(bytes) {
@@ -3798,7 +5176,7 @@ async function publishEventToRelay(relayUrl, event) {
     const timeout = setTimeout(() => {
       socket.close();
       reject(new Error("Relay timeout"));
-    }, 5000);
+    }, 10_000);
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify(["EVENT", event]));
     });
@@ -3881,6 +5259,994 @@ async function ensureProfiles(pubkeys) {
   if (!missing.length) return;
   const fetched = await fetchProfiles(missing);
   fetched.forEach((value, key) => profilesCache.set(key, value));
+
+  const stillMissing = missing.filter((k) => k && !profilesCache.has(k));
+  if (!stillMissing.length) return;
+  try {
+    const retry = await fetchProfiles(stillMissing);
+    retry.forEach((value, key) => profilesCache.set(key, value));
+  } catch {}
+}
+
+function getLiveRolesFrom30311(video) {
+  const roles = new Map();
+  try {
+    const tags = video?.nostrEventRaw?.tags || [];
+    tags
+      .filter((t) => Array.isArray(t) && t[0] === "p" && t[1])
+      .forEach((t) => {
+        const pk = String(t[1] || "");
+        // NIP-53 implementations vary: role may appear at index 2 or 3.
+        // Common shapes:
+        //  - ["p", pubkey, relay, role]
+        //  - ["p", pubkey, role]
+        const roleCandidate =
+          (t.length >= 4 ? t[3] : "") ||
+          (t.length >= 3 ? t[2] : "") ||
+          "";
+        const role = String(roleCandidate || "").trim();
+        if (pk && role) roles.set(pk, role);
+      });
+  } catch {}
+  return roles;
+}
+
+function getLiveHostPubkeyFrom30311(video) {
+  try {
+    const tags = video?.nostrEventRaw?.tags || [];
+    const host = tags
+      .filter((t) => Array.isArray(t) && t[0] === "p" && t[1])
+      .map((t) => {
+        const pk = String(t[1] || "");
+        const roleCandidate = (t.length >= 4 ? t[3] : "") || (t.length >= 3 ? t[2] : "") || "";
+        const role = String(roleCandidate || "").trim().toLowerCase();
+        return { pk, role };
+      })
+      .find((x) => x.pk && x.role === "host");
+    return host?.pk ? String(host.pk) : "";
+  } catch {
+    return "";
+  }
+}
+
+function getLiveHostProofFrom30311(video, hostPubkey) {
+  try {
+    const target = String(hostPubkey || "");
+    if (!target) return "";
+    const tags = video?.nostrEventRaw?.tags || [];
+    const hostTag = tags
+      .filter((t) => Array.isArray(t) && t[0] === "p" && String(t[1] || "") === target)
+      .map((t) => {
+        const roleCandidate = (t.length >= 4 ? t[3] : "") || (t.length >= 3 ? t[2] : "") || "";
+        const role = String(roleCandidate || "").trim().toLowerCase();
+        const proof = String(t?.[4] || "").trim();
+        return { role, proof };
+      })
+      .find((x) => x.role === "host");
+    const proof = String(hostTag?.proof || "").trim();
+    return /^[0-9a-f]{128}$/i.test(proof) ? proof : "";
+  } catch {
+    return "";
+  }
+}
+
+async function sha256Hex(text) {
+  try {
+    const msg = String(text || "");
+    if (!msg) return "";
+    if (!window.crypto?.subtle) return "";
+    const bytes = new TextEncoder().encode(msg);
+    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+    const out = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    return out;
+  } catch {
+    return "";
+  }
+}
+
+async function verifyNip53ParticipantProof({ eventPubkey, dTag, participantPubkey, proofHex }) {
+  try {
+    const publisher = String(eventPubkey || "");
+    const d = String(dTag || "");
+    const participant = String(participantPubkey || "");
+    const proof = String(proofHex || "");
+    if (!publisher || !d || !participant) return false;
+    if (!/^[0-9a-f]{64}$/i.test(publisher)) return false;
+    if (!/^[0-9a-f]{64}$/i.test(participant)) return false;
+    if (!/^[0-9a-f]{128}$/i.test(proof)) return false;
+
+    const aTag = `30311:${publisher}:${d}`;
+    const hashHex = await sha256Hex(aTag);
+    if (!/^[0-9a-f]{64}$/i.test(hashHex)) return false;
+
+    const tools = getNostrTools();
+    if (!tools) return false;
+    const msgBytes = hexToBytes(hashHex);
+
+    if (typeof tools.verifySignature === "function") {
+      // (sig, msgHash, pubkey)
+      if (msgBytes) return Boolean(tools.verifySignature(proof, msgBytes, participant));
+      return Boolean(tools.verifySignature(proof, hashHex, participant));
+    }
+    if (tools.schnorr && typeof tools.schnorr.verify === "function") {
+      if (msgBytes) {
+        try {
+          if (tools.schnorr.verify(proof, msgBytes, participant)) return true;
+        } catch {}
+      }
+      return Boolean(tools.schnorr.verify(proof, hashHex, participant));
+    }
+  } catch {}
+  return false;
+}
+
+async function getVerifiedLiveHostPubkey(video) {
+  try {
+    if (!video || Number(video.kind) !== 30311) return "";
+    const hostPk = getLiveHostPubkeyFrom30311(video);
+    if (!hostPk) return "";
+    const proof = getLiveHostProofFrom30311(video, hostPk);
+    if (!proof) return "";
+    const raw = video?.nostrEventRaw;
+    const dTag = String(getTagValueFromEvent(raw, "d") || "").trim();
+    if (!dTag) return "";
+    const ok = await verifyNip53ParticipantProof({
+      eventPubkey: String(raw?.pubkey || ""),
+      dTag,
+      participantPubkey: hostPk,
+      proofHex: proof,
+    });
+    return ok ? hostPk : "";
+  } catch {
+    return "";
+  }
+}
+
+async function getLiveHostVerificationState(video) {
+  try {
+    if (!video || Number(video.kind) !== 30311) return { pubkey: "", verified: false };
+    const hostPk = getLiveHostPubkeyFrom30311(video);
+    if (!hostPk) return { pubkey: "", verified: false };
+    const verifiedPk = await getVerifiedLiveHostPubkey(video);
+    return { pubkey: hostPk, verified: Boolean(verifiedPk && verifiedPk === hostPk) };
+  } catch {
+    return { pubkey: "", verified: false };
+  }
+}
+
+async function fetchLive30311RolesForVideo(video, relays) {
+  try {
+    if (!video || video.kind !== 30311) return new Map();
+    const existing = getLiveRolesFrom30311(video);
+    if (existing && existing.size) return existing;
+    const coord = parseAddressableCoord(video.address);
+    if (!coord) return new Map();
+
+    const collected = new Map();
+    const filter = { kinds: [coord.kind], authors: [coord.pubkey], "#d": [coord.d], limit: 3 };
+    await Promise.all(
+      (Array.isArray(relays) ? relays : []).map((relay) =>
+        requestEvents(relay, filter, (ev) => {
+          if (ev?.id && !collected.has(ev.id)) collected.set(ev.id, ev);
+        })
+      )
+    );
+    const events = Array.from(collected.values());
+    events.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+    const picked = events[0] || null;
+    if (!picked) return new Map();
+    const tmp = { ...video, nostrEventRaw: picked };
+    return getLiveRolesFrom30311(tmp);
+  } catch {
+    return new Map();
+  }
+}
+
+function getWatchCommentFetchSpec(video) {
+  if (!video?.id) return null;
+  if (video.kind === 30311) {
+    const addr = String(video.address || video.id || "");
+    if (!addr) return null;
+    return { kind: 1311, filter: { kinds: [1311], "#a": [addr], limit: 200 } };
+  }
+
+  // For video comments, support both NIP-22 (kind 1111) and legacy kind 1.
+  // Prefer NIP-22 for new posts, but keep reading legacy so existing comments show up.
+  if (video.address) {
+    return {
+      kind: 1111,
+      filters: [
+        { kinds: [1111], "#A": [video.address], limit: 200 },
+        { kinds: [1], "#a": [video.address], limit: 200 },
+      ],
+    };
+  }
+  return {
+    kind: 1111,
+    filters: [
+      { kinds: [1111], "#E": [video.id], limit: 200 },
+      { kinds: [1], "#e": [video.id], limit: 200 },
+    ],
+  };
+}
+
+function resetWatchRenderedCommentsState() {
+  watchRenderedCommentIds = new Set();
+  watchRenderedCommentMaxCreatedAt = 0;
+}
+
+function resetWatchCommentsCache(key) {
+  watchCommentsCacheKey = String(key || "");
+  watchCommentsCacheById = new Map();
+}
+
+function renderWatchCommentEvent(ev, profiles, rolesByPubkey, reactionInfo) {
+  const wrap = document.createElement("div");
+  wrap.className = "watch-comment";
+  wrap.dataset.commentId = String(ev?.id || "");
+  wrap.dataset.commentCreatedAt = String(ev?.created_at || 0);
+
+  const avatar = document.createElement("a");
+  avatar.className = "channel-avatar";
+  avatar.href = "#";
+  const initials = document.createElement("span");
+  initials.className = "channel-initials";
+  const img = document.createElement("img");
+  img.className = "avatar-img";
+  img.alt = "";
+  img.loading = "lazy";
+  avatar.appendChild(initials);
+  avatar.appendChild(img);
+
+  const body = document.createElement("div");
+  body.className = "watch-comment-body";
+  const meta = document.createElement("div");
+  meta.className = "watch-comment-meta";
+  const author = document.createElement("a");
+  author.className = "watch-comment-author";
+  author.href = "#";
+  const time = document.createElement("span");
+  time.className = "watch-comment-time";
+  const text = document.createElement("div");
+  text.className = "watch-comment-text";
+
+  const actions = document.createElement("div");
+  actions.className = "watch-comment-row-actions";
+  const likeBtn = document.createElement("button");
+  likeBtn.className = "watch-comment-row-action";
+  likeBtn.type = "button";
+  likeBtn.dataset.action = "like";
+  const likeIcon = document.createElement("span");
+  likeIcon.className = "material-symbols-rounded";
+  likeIcon.textContent = "thumb_up";
+  likeBtn.appendChild(likeIcon);
+  likeBtn.appendChild(document.createTextNode("Like"));
+  const dislikeBtn = document.createElement("button");
+  dislikeBtn.className = "watch-comment-row-action";
+  dislikeBtn.type = "button";
+  dislikeBtn.dataset.action = "dislike";
+  const dislikeIcon = document.createElement("span");
+  dislikeIcon.className = "material-symbols-rounded";
+  dislikeIcon.textContent = "thumb_down";
+  dislikeBtn.appendChild(dislikeIcon);
+  dislikeBtn.appendChild(document.createTextNode("Dislike"));
+  const replyBtn = document.createElement("button");
+  replyBtn.className = "watch-comment-row-action";
+  replyBtn.type = "button";
+  replyBtn.dataset.action = "reply";
+  const replyIcon = document.createElement("span");
+  replyIcon.className = "material-symbols-rounded";
+  replyIcon.textContent = "reply";
+  replyBtn.appendChild(replyIcon);
+  replyBtn.appendChild(document.createTextNode("Reply"));
+  actions.appendChild(likeBtn);
+  actions.appendChild(dislikeBtn);
+  actions.appendChild(replyBtn);
+
+  const replyComposer = document.createElement("div");
+  replyComposer.className = "watch-comment-reply";
+  replyComposer.hidden = true;
+  const replyInput = document.createElement("textarea");
+  replyInput.className = "watch-comment-input";
+  replyInput.rows = 1;
+  replyInput.placeholder = "Write a reply…";
+  bindAutoResizeTextarea(replyInput, 180);
+  const replyActions = document.createElement("div");
+  replyActions.className = "watch-comment-actions";
+  const replyCancel = document.createElement("button");
+  replyCancel.className = "text-btn";
+  replyCancel.type = "button";
+  replyCancel.textContent = "Cancel";
+  const replyPost = document.createElement("button");
+  replyPost.className = "watch-comment-btn";
+  replyPost.type = "button";
+  replyPost.textContent = "Post";
+  replyActions.appendChild(replyCancel);
+  replyActions.appendChild(replyPost);
+  replyComposer.appendChild(replyInput);
+  replyComposer.appendChild(replyActions);
+
+  const pk = String(ev?.pubkey || "");
+  const profile = profiles?.get?.(pk) || profilesCache.get(pk) || null;
+  const name = profile?.name || shortenKey(pk);
+  const role = rolesByPubkey?.get?.(pk) || "";
+  author.textContent = role ? `${name} · ${role}` : name;
+  avatar.href = pk ? `#channel/${pk}` : "#";
+  author.href = pk ? `#channel/${pk}` : "#";
+  const roleLower = String(role || "").toLowerCase();
+  author.classList.toggle(
+    "is-host",
+    roleLower === "host" ||
+      roleLower.includes("host") ||
+      roleLower === "owner" ||
+      roleLower.includes("owner") ||
+      roleLower === "creator" ||
+      roleLower.includes("creator") ||
+      roleLower === "admin" ||
+      roleLower.includes("admin")
+  );
+  author.classList.toggle(
+    "is-mod",
+    roleLower === "moderator" || roleLower === "mod" || roleLower.includes("mod")
+  );
+  time.textContent = ev?.created_at ? timeAgo(ev.created_at) : "";
+  const duration = watchVideo && Number.isFinite(watchVideo.duration) ? Number(watchVideo.duration) : 0;
+  try {
+    renderCommentRichText(text, String(ev?.content || ""), { duration, profiles, enableTimestamps: true });
+  } catch {
+    text.textContent = String(ev?.content || "");
+  }
+
+  const likes = Number(reactionInfo?.likes || 0);
+  const dislikes = Number(reactionInfo?.dislikes || 0);
+  const likedByMe = Boolean(reactionInfo?.likedByMe);
+  const dislikedByMe = Boolean(reactionInfo?.dislikedByMe);
+  setCommentReactionChip(likeBtn, "thumb_up", likes);
+  setCommentReactionChip(dislikeBtn, "thumb_down", dislikes);
+  likeBtn.classList.toggle("is-active", likedByMe);
+  dislikeBtn.classList.toggle("is-active", dislikedByMe);
+
+  const commentId = String(ev?.id || "");
+  const commentPubkey = String(ev?.pubkey || "");
+  const commentKind = String(ev?.kind || "");
+
+  likeBtn.addEventListener("click", async () => {
+    try {
+      if (!authState.pubkey) {
+        showToast("Sign in to like");
+        openAuthModal("chooser");
+        return;
+      }
+      if (!commentId) return;
+      const state = watchCommentReactionsById.get(commentId) || { likes: 0, dislikes: 0 };
+      if (state.likedByMe) {
+        if (state.userLikeEventId) {
+          await deleteWatchReaction(state.userLikeEventId, state.userLikeRelayHint);
+        }
+        watchCommentReactionsById.set(commentId, {
+          ...state,
+          likedByMe: false,
+          userLikeEventId: "",
+          userLikeRelayHint: "",
+          likes: Math.max(0, Number(state.likes || 0) - 1),
+        });
+        showToast("Unliked");
+      } else {
+        if (state.dislikedByMe && state.userDislikeEventId) {
+          await deleteWatchReaction(state.userDislikeEventId, state.userDislikeRelayHint);
+        }
+        const hint = getPreferredRelayHint();
+        const tags = [["e", commentId, hint, commentPubkey], ["p", commentPubkey, hint], ["k", commentKind]];
+        const unsigned = buildUnsignedEvent(7, "+", tags);
+        const signed = await signEvent(unsigned);
+        await publishEvent(signed);
+        watchCommentReactionsById.set(commentId, {
+          ...state,
+          likedByMe: true,
+          dislikedByMe: false,
+          userLikeEventId: String(signed?.id || ""),
+          userLikeRelayHint: hint,
+          userDislikeEventId: "",
+          userDislikeRelayHint: "",
+          likes: Number(state.likes || 0) + 1,
+          dislikes: state.dislikedByMe ? Math.max(0, Number(state.dislikes || 0) - 1) : Number(state.dislikes || 0),
+        });
+        showToast("Liked");
+      }
+      const next = watchCommentReactionsById.get(commentId) || {};
+      likeBtn.classList.toggle("is-active", Boolean(next.likedByMe));
+      dislikeBtn.classList.toggle("is-active", Boolean(next.dislikedByMe));
+      setCommentReactionChip(likeBtn, "thumb_up", next.likes);
+      setCommentReactionChip(dislikeBtn, "thumb_down", next.dislikes);
+    } catch (error) {
+      showToast(error?.message || "Like failed");
+    }
+  });
+
+  dislikeBtn.addEventListener("click", async () => {
+    try {
+      if (!authState.pubkey) {
+        showToast("Sign in to dislike");
+        openAuthModal("chooser");
+        return;
+      }
+      if (!commentId) return;
+      const state = watchCommentReactionsById.get(commentId) || { likes: 0, dislikes: 0 };
+      if (state.dislikedByMe) {
+        if (state.userDislikeEventId) {
+          await deleteWatchReaction(state.userDislikeEventId, state.userDislikeRelayHint);
+        }
+        watchCommentReactionsById.set(commentId, {
+          ...state,
+          dislikedByMe: false,
+          userDislikeEventId: "",
+          userDislikeRelayHint: "",
+          dislikes: Math.max(0, Number(state.dislikes || 0) - 1),
+        });
+        showToast("Undisliked");
+      } else {
+        if (state.likedByMe && state.userLikeEventId) {
+          await deleteWatchReaction(state.userLikeEventId, state.userLikeRelayHint);
+        }
+        const hint = getPreferredRelayHint();
+        const tags = [["e", commentId, hint, commentPubkey], ["p", commentPubkey, hint], ["k", commentKind]];
+        const unsigned = buildUnsignedEvent(7, "-", tags);
+        const signed = await signEvent(unsigned);
+        await publishEvent(signed);
+        watchCommentReactionsById.set(commentId, {
+          ...state,
+          dislikedByMe: true,
+          likedByMe: false,
+          userDislikeEventId: String(signed?.id || ""),
+          userDislikeRelayHint: hint,
+          userLikeEventId: "",
+          userLikeRelayHint: "",
+          dislikes: Number(state.dislikes || 0) + 1,
+          likes: state.likedByMe ? Math.max(0, Number(state.likes || 0) - 1) : Number(state.likes || 0),
+        });
+        showToast("Disliked");
+      }
+      const next = watchCommentReactionsById.get(commentId) || {};
+      likeBtn.classList.toggle("is-active", Boolean(next.likedByMe));
+      dislikeBtn.classList.toggle("is-active", Boolean(next.dislikedByMe));
+      setCommentReactionChip(likeBtn, "thumb_up", next.likes);
+      setCommentReactionChip(dislikeBtn, "thumb_down", next.dislikes);
+    } catch (error) {
+      showToast(error?.message || "Dislike failed");
+    }
+  });
+
+  replyBtn.addEventListener("click", async () => {
+    if (!authState.pubkey) {
+      showToast("Sign in to reply");
+      openAuthModal("chooser");
+      return;
+    }
+    replyComposer.hidden = !replyComposer.hidden;
+    if (!replyComposer.hidden) {
+      try {
+        replyInput.focus();
+      } catch {}
+    }
+  });
+
+  replyCancel.addEventListener("click", () => {
+    replyComposer.hidden = true;
+    replyInput.value = "";
+    autoResizeTextarea(replyInput, 180);
+  });
+
+  replyPost.addEventListener("click", async () => {
+    try {
+      if (!authState.pubkey) {
+        showToast("Sign in to reply");
+        openAuthModal("chooser");
+        return;
+      }
+      const video = getCurrentWatchVideo();
+      if (!video?.id) return;
+      const replyText = String(replyInput.value || "").trim();
+      if (!replyText) return;
+      replyPost.disabled = true;
+      let unsigned = null;
+      if (video.kind === 30311) {
+        const addr = String(video.address || video.id || "");
+        if (!addr) return;
+        const hint = getPreferredRelayHint();
+        unsigned = buildUnsignedEvent(1311, replyText, [
+          ["a", addr, "", "root"],
+          ["e", commentId, hint, commentPubkey],
+          ["p", commentPubkey, hint],
+        ]);
+      } else {
+        unsigned = buildUnsignedVideoCommentReply1111(video, ev, replyText);
+      }
+      if (!unsigned) return;
+      const signed = await signEvent(unsigned);
+      await publishEvent(signed);
+      showToast("Reply posted");
+      replyComposer.hidden = true;
+      replyInput.value = "";
+      autoResizeTextarea(replyInput, 180);
+      try {
+        await loadWatchComments(video);
+      } catch {}
+    } catch (error) {
+      showToast(error?.message || "Reply failed");
+    } finally {
+      replyPost.disabled = false;
+    }
+  });
+  try {
+    hydrateAvatar(avatar, profile || { name, picture: "" });
+  } catch {
+    initials.textContent = initialsFromName(name);
+  }
+
+  meta.appendChild(author);
+  meta.appendChild(time);
+  body.appendChild(meta);
+  body.appendChild(text);
+  body.appendChild(actions);
+  body.appendChild(replyComposer);
+  wrap.appendChild(avatar);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+function renderWatchComments(events, profiles, rolesByPubkey, opts) {
+  if (!watchCommentsList || !watchCommentsEmpty) return;
+  const incremental = Boolean(opts?.incremental);
+  const isLiveChat = Boolean(opts?.isLiveChat);
+  if (!incremental) {
+    watchCommentsList.innerHTML = "";
+    resetWatchRenderedCommentsState();
+  }
+
+  if (incremental && isLiveChat) {
+    const items = Array.isArray(events) ? events.slice() : [];
+    const next = items
+      .filter((ev) => ev?.id && !watchRenderedCommentIds.has(String(ev.id)))
+      .sort((a, b) => Number(b?.created_at || 0) - Number(a?.created_at || 0));
+    if (!next.length) return;
+    watchCommentsEmpty.hidden = true;
+    next.forEach((ev) => {
+      const id = String(ev?.id || "");
+      if (!id) return;
+      if (Number(ev?.kind) === 9735) {
+        const zapAmount = parseZapReceiptAmountSats(ev);
+        const details = parseZapReceiptDetails(ev);
+        const senderPk = String(details?.senderPubkey || "");
+        if (!senderPk) return;
+        const senderProfile = profiles?.get?.(senderPk) || profilesCache.get(senderPk) || null;
+        const senderName = String(senderProfile?.name || "").trim() || formatNpubShort(senderPk);
+        const base = zapAmount ? `${senderName} zapped ${zapAmount} sats` : `${senderName} zapped`;
+        const msg = String(details?.message || "").trim();
+        const desc = msg ? `${base}: ${msg}` : base;
+        const fake = { ...ev, pubkey: senderPk, content: desc };
+        const el = renderWatchCommentEvent(fake, profiles, rolesByPubkey, null);
+        if (!el) return;
+        try {
+          el.classList.add("is-zap");
+          const actions = el.querySelector(".watch-comment-row-actions");
+          if (actions) actions.hidden = true;
+          const reply = el.querySelector(".watch-comment-reply");
+          if (reply) reply.hidden = true;
+        } catch {}
+        insertWatchCommentNodeNewestFirst(el);
+        watchRenderedCommentIds.add(id);
+      } else {
+        const reactionInfo = watchCommentReactionsById.get(id) || null;
+        const node = renderWatchCommentEvent(ev, profiles, rolesByPubkey, reactionInfo);
+        if (!node) return;
+        insertWatchCommentNodeNewestFirst(node);
+        watchRenderedCommentIds.add(id);
+      }
+      const ts = Number(ev?.created_at || 0);
+      if (ts && ts > watchRenderedCommentMaxCreatedAt) watchRenderedCommentMaxCreatedAt = ts;
+    });
+    return;
+  }
+
+  const items = Array.isArray(events) ? events.slice() : [];
+  // Put zap receipts (9735) as non-threaded roots.
+  const zaps = items.filter((ev) => Number(ev?.kind) === 9735);
+  const normals = items.filter((ev) => Number(ev?.kind) !== 9735);
+  const mergedItems = normals.concat(zaps);
+  const byId = new Map();
+  mergedItems.forEach((ev) => {
+    if (ev?.id) byId.set(String(ev.id), ev);
+  });
+
+  const findParentIdInBatch = (ev) => {
+    try {
+      const tags = Array.isArray(ev?.tags) ? ev.tags : [];
+      const candidates = tags
+        .filter((t) => Array.isArray(t) && (t[0] === "e" || t[0] === "E" || t[0] === "q") && t[1])
+        .map((t) => ({
+          id: String(t[1] || ""),
+          markerA: String(t?.[3] || "").toLowerCase(),
+          markerB: String(t?.[4] || "").toLowerCase(),
+        }))
+        .filter((c) => c.id);
+
+      const replyMarked = candidates.find((c) => c.markerA === "reply" || c.markerB === "reply");
+      if (replyMarked && byId.has(replyMarked.id)) return replyMarked.id;
+
+      // Otherwise choose the first candidate that points to another comment in this batch.
+      const firstInBatch = candidates.find((c) => byId.has(c.id));
+      if (firstInBatch) return firstInBatch.id;
+
+      // Fall back to legacy heuristic.
+      return getNip22ReplyParentId(ev);
+    } catch {}
+    return getNip22ReplyParentId(ev);
+  };
+
+  const childrenByParent = new Map();
+  const roots = [];
+  mergedItems.forEach((ev) => {
+    const id = String(ev?.id || "");
+    if (Number(ev?.kind) === 9735) {
+      roots.push(ev);
+      return;
+    }
+    const parentId = findParentIdInBatch(ev);
+    const hasParent = parentId && byId.has(parentId);
+    if (hasParent) {
+      const list = childrenByParent.get(parentId) || [];
+      list.push(ev);
+      childrenByParent.set(parentId, list);
+    } else {
+      roots.push(ev);
+    }
+  });
+  roots.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+  childrenByParent.forEach((list, key) => {
+    list.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
+    childrenByParent.set(key, list);
+  });
+
+  if (!items.length) {
+    if (incremental) return;
+    watchCommentsEmpty.textContent = "No comments yet.";
+    watchCommentsEmpty.hidden = false;
+    return;
+  }
+  watchCommentsEmpty.hidden = true;
+
+  const renderThread = (ev, depth) => {
+    const id = String(ev?.id || "");
+    if (!id) return;
+    if (incremental && watchRenderedCommentIds.has(id)) {
+      return;
+    }
+
+    if (Number(ev?.kind) === 9735) {
+      const zapAmount = parseZapReceiptAmountSats(ev);
+      const details = parseZapReceiptDetails(ev);
+      const senderPk = String(details?.senderPubkey || "");
+      const senderProfile = senderPk ? profiles?.get?.(senderPk) || profilesCache.get(senderPk) || null : null;
+      if (!senderPk) return;
+      const senderName = String(senderProfile?.name || "").trim() || formatNpubShort(senderPk);
+      const base = zapAmount ? `${senderName} zapped ${zapAmount} sats` : `${senderName} zapped`;
+      const msg = String(details?.message || "").trim();
+      const desc = msg ? `${base}: ${msg}` : base;
+      const fake = {
+        ...ev,
+        pubkey: senderPk || String(ev?.pubkey || ""),
+        content: desc,
+      };
+      const el = renderWatchCommentEvent(fake, profiles, rolesByPubkey, null);
+      try {
+        el.classList.add("is-zap");
+      } catch {}
+      try {
+        const textEl = el.querySelector(".watch-comment-text");
+        if (textEl) {
+          textEl.innerHTML = "";
+          const icon = document.createElement("span");
+          icon.className = "material-symbols-rounded";
+          icon.textContent = "bolt";
+          const label = document.createElement("span");
+          label.textContent = desc;
+          textEl.appendChild(icon);
+          textEl.appendChild(label);
+        }
+      } catch {}
+      try {
+        const actions = el.querySelector(".watch-comment-row-actions");
+        if (actions) actions.hidden = true;
+        const reply = el.querySelector(".watch-comment-reply");
+        if (reply) reply.hidden = true;
+      } catch {}
+      watchCommentsList.appendChild(el);
+      if (id) watchRenderedCommentIds.add(id);
+      const ts = Number(ev?.created_at || 0);
+      if (ts && ts > watchRenderedCommentMaxCreatedAt) watchRenderedCommentMaxCreatedAt = ts;
+      return;
+    }
+    const reactionInfo = watchCommentReactionsById.get(id) || null;
+    const node = renderWatchCommentEvent(ev, profiles, rolesByPubkey, reactionInfo);
+    if (!node) return;
+    node.dataset.commentDepth = String(depth || 0);
+    node.classList.toggle("is-reply", depth > 0);
+    if (depth > 0) {
+      try {
+        const cappedDepth = Math.min(5, depth);
+        const indentPx = cappedDepth * 26;
+        node.style.setProperty("--thread-indent", `${indentPx}px`);
+        node.style.setProperty("--thread-depth", String(cappedDepth));
+        node.style.paddingLeft = `var(--thread-indent)`;
+      } catch {}
+    }
+    watchCommentsList.appendChild(node);
+    const createdAt = Number(ev?.created_at || 0);
+    watchRenderedCommentIds.add(id);
+    if (createdAt > watchRenderedCommentMaxCreatedAt) {
+      watchRenderedCommentMaxCreatedAt = createdAt;
+    }
+    const kids = childrenByParent.get(id) || [];
+    kids.forEach((child) => renderThread(child, depth + 1));
+  };
+
+  roots.forEach((ev) => renderThread(ev, 0));
+}
+
+async function loadWatchComments(video, opts) {
+  if (!watchCommentsList || !watchCommentsEmpty) return;
+  const loadToken = Number(opts?.loadToken || 0);
+  if (loadToken && loadToken !== watchCommentsLoadToken) return;
+  const spec = getWatchCommentFetchSpec(video);
+  if (!spec) {
+    watchCommentsList.innerHTML = "";
+    watchCommentsEmpty.textContent = "No comments yet.";
+    watchCommentsEmpty.hidden = false;
+    resetWatchRenderedCommentsState();
+    return;
+  }
+
+  const key = `${spec.kind}:${spec.kind === 1311 ? "chat" : "comment"}:${String(video.address || video.id || "")}`;
+  const currentRoute = getRoute();
+  if (currentRoute.page !== "watch" && currentRoute.page !== "fullscreen") return;
+
+  const incremental = Boolean(opts?.incremental);
+  const prevKey = String(watchCommentsPollKey || "");
+  // Ensure polling key is stable even if this call exits early.
+  watchCommentsPollKey = key;
+  const shouldReset = !incremental || key !== prevKey;
+
+  const relays = mergeRelays(getReadRelays(), parseRelayHints(currentRoute?.params));
+  const collected = new Map();
+  const incrementalSince = Boolean(opts?.incremental) && watchRenderedCommentMaxCreatedAt
+    ? Number(watchRenderedCommentMaxCreatedAt) + 1
+    : 0;
+  const baseFilters = spec.filter ? [spec.filter] : Array.isArray(spec.filters) ? spec.filters : [];
+  const filters = baseFilters.map((f) => {
+    const next = { ...(f || {}) };
+    if (incrementalSince && !next.since) next.since = incrementalSince;
+    return next;
+  });
+  await Promise.all(
+    relays.flatMap((relay) =>
+      filters.map((filter) =>
+        requestEvents(relay, filter, (ev) => {
+          if (ev?.id && !collected.has(ev.id)) collected.set(ev.id, ev);
+        })
+      )
+    )
+  );
+
+  if (loadToken && loadToken !== watchCommentsLoadToken) return;
+
+  // Inline zap receipts in live chat.
+  if (spec.kind === 1311 && video?.kind === 30311) {
+    try {
+      const addr = String(video.address || "");
+      if (addr) {
+        const zapCollected = new Map();
+        const zapFilter = { kinds: [9735], "#a": [addr], limit: 200 };
+        await Promise.all(
+          relays.map((relay) =>
+            requestEvents(relay, zapFilter, (ev) => {
+              if (ev?.id && !zapCollected.has(ev.id)) zapCollected.set(ev.id, ev);
+            })
+          )
+        );
+        zapCollected.forEach((ev, id) => {
+          if (id && !collected.has(id)) collected.set(id, ev);
+        });
+      }
+    } catch {}
+  }
+
+  if (loadToken && loadToken !== watchCommentsLoadToken) return;
+
+  const fetched = Array.from(collected.values());
+  const isLiveChat = spec.kind === 1311;
+
+  if (!incremental && fetched.length === 0 && watchRenderedCommentIds.size) {
+    return;
+  }
+
+  if (shouldReset) {
+    watchCommentsEmpty.textContent = "Loading…";
+    watchCommentsEmpty.hidden = false;
+    watchCommentsList.innerHTML = "";
+    resetWatchRenderedCommentsState();
+    resetWatchCommentsCache(key);
+  }
+  if (isLiveChat) {
+    if (!incremental || watchCommentsCacheKey !== key) {
+      resetWatchCommentsCache(key);
+    }
+    fetched.forEach((ev) => {
+      if (ev?.id && !watchCommentsCacheById.has(ev.id)) watchCommentsCacheById.set(ev.id, ev);
+    });
+  }
+  const events = isLiveChat ? Array.from(watchCommentsCacheById.values()) : fetched;
+
+  if (incremental && isLiveChat && !fetched.length) {
+    try {
+      const chatCount = events.filter((e) => Number(e?.kind) === 1311).length;
+      if (watchCommentsTitle) watchCommentsTitle.textContent = `Live chat (${chatCount})`;
+      watchCommentsEmpty.hidden = chatCount > 0;
+    } catch {}
+    return;
+  }
+  try {
+    await loadWatchCommentReactions(events, relays);
+  } catch {
+    watchCommentReactionsById = new Map();
+  }
+  try {
+    if (watchCommentsTitle) {
+      if (isLiveChat) {
+        const chatCount = events.filter((e) => Number(e?.kind) === 1311).length;
+        watchCommentsTitle.textContent = `Live chat (${chatCount})`;
+      } else watchCommentsTitle.textContent = `Comments (${events.length})`;
+    }
+  } catch {}
+  const pubkeys = [...new Set(events.map((e) => e.pubkey).filter(Boolean))];
+  const zapSenderPubkeys = (() => {
+    try {
+      const out = new Set();
+      events.forEach((ev) => {
+        if (Number(ev?.kind) !== 9735) return;
+        const details = parseZapReceiptDetails(ev);
+        const pk = String(details?.senderPubkey || "");
+        if (pk) out.add(pk);
+      });
+      return Array.from(out.values());
+    } catch {
+      return [];
+    }
+  })();
+  const mentionPubkeys = (() => {
+    try {
+      const out = new Set();
+      events.forEach((ev) => {
+        extractMentionPubkeysFromText(ev?.content || "").forEach((pk) => out.add(pk));
+      });
+      return Array.from(out.values());
+    } catch {
+      return [];
+    }
+  })();
+  const allProfilePubkeys = [...new Set(pubkeys.concat(mentionPubkeys, zapSenderPubkeys).filter(Boolean))];
+  try {
+    await ensureProfiles(allProfilePubkeys);
+  } catch {}
+  const profiles = new Map();
+  allProfilePubkeys.forEach((pk) => profiles.set(pk, profilesCache.get(pk)));
+  const roles =
+    video?.kind === 30311
+      ? await fetchLive30311RolesForVideo(video, relays)
+      : new Map();
+  if (loadToken && loadToken !== watchCommentsLoadToken) return;
+  renderWatchComments(events, profiles, roles, { incremental, isLiveChat });
+}
+
+async function loadWatchLikeCount(video) {
+  if ((!watchLikeBtn && !watchDislikeBtn) || !video?.id) return;
+  const relays = mergeRelays(getReadRelays(), parseRelayHints(getRoute()?.params));
+  const filter = video.address
+    ? { kinds: [7], "#a": [video.address], limit: 500 }
+    : { kinds: [7], "#e": [video.id], limit: 500 };
+  const collected = new Map();
+  await Promise.all(
+    relays.map((relay) =>
+      requestEvents(relay, filter, (ev) => {
+        if (!ev?.id) return;
+        if (!collected.has(ev.id)) collected.set(ev.id, ev);
+      })
+    )
+  );
+  const all = Array.from(collected.values());
+  const likes = all.filter((ev) => {
+    const c = String(ev?.content || "").trim();
+    return c === "+" || c === "";
+  });
+  const dislikes = all.filter((ev) => String(ev?.content || "").trim() === "-");
+
+  const likeCount = new Set(likes.map((ev) => String(ev?.pubkey || "")).filter(Boolean)).size;
+  const dislikeCount = new Set(dislikes.map((ev) => String(ev?.pubkey || "")).filter(Boolean)).size;
+
+  if (watchLikeBtn) {
+    const icon = watchLikeBtn.querySelector(".material-symbols-rounded");
+    watchLikeBtn.textContent = likeCount ? `Like (${likeCount})` : "Like";
+    if (icon) watchLikeBtn.prepend(icon);
+  }
+  if (watchDislikeBtn) {
+    const icon = watchDislikeBtn.querySelector(".material-symbols-rounded");
+    watchDislikeBtn.textContent = dislikeCount ? `Dislike (${dislikeCount})` : "Dislike";
+    if (icon) watchDislikeBtn.prepend(icon);
+  }
+}
+
+function stopWatchCommentsPolling() {
+  if (!watchCommentsPollTimer) return;
+  try {
+    window.clearInterval(watchCommentsPollTimer);
+  } catch {}
+  watchCommentsPollTimer = 0;
+}
+
+function startWatchCommentsPolling(video) {
+  stopWatchCommentsPolling();
+  if (!video?.id) return;
+  if (video.kind !== 30311) return;
+  const token = watchCommentsLoadToken;
+  watchCommentsPollTimer = window.setInterval(() => {
+    if (token !== watchCommentsLoadToken) {
+      stopWatchCommentsPolling();
+      return;
+    }
+    const route = getRoute();
+    if (route.page !== "watch" && route.page !== "fullscreen") {
+      stopWatchCommentsPolling();
+      return;
+    }
+    const current = getCurrentWatchVideo();
+    if (!current?.id) return;
+    const spec = getWatchCommentFetchSpec(current);
+    if (!spec) return;
+    const key = `${spec.kind}:${spec.kind === 1311 ? "chat" : "comment"}:${String(current.address || current.id || "")}`;
+    if (watchCommentsPollKey && key !== watchCommentsPollKey) {
+      watchCommentsPollKey = key;
+    }
+    loadWatchComments(current, { incremental: true, loadToken: token }).catch(() => {});
+  }, 10_000);
+}
+
+function resetWatchCommentsUiForVideo(video) {
+  try {
+    stopWatchCommentsPolling();
+  } catch {}
+  try {
+    watchCommentsPollKey = "";
+    watchCommentsCacheKey = "";
+    watchCommentsCacheById = new Map();
+    resetWatchRenderedCommentsState();
+  } catch {}
+  try {
+    if (watchCommentsList) watchCommentsList.innerHTML = "";
+  } catch {}
+  try {
+    if (watchCommentsEmpty) {
+      watchCommentsEmpty.textContent = "Loading…";
+      watchCommentsEmpty.hidden = false;
+    }
+  } catch {}
+  try {
+    if (watchCommentsTitle) {
+      const spec = getWatchCommentFetchSpec(video);
+      if (spec?.kind === 1311) watchCommentsTitle.textContent = "Live chat";
+      else watchCommentsTitle.textContent = "Comments";
+    }
+  } catch {}
 }
 
 function renderSidebarSubs() {
@@ -4089,25 +6455,42 @@ function renderChannelHeader(pubkey, token) {
   }
   if (channelInitials) channelInitials.textContent = initialsFromName(name || pubkey);
 
+  if (channelAbout) {
+    try {
+      renderMentionsOnly(channelAbout, String(profile.about || "").trim(), profilesCache);
+    } catch {
+      channelAbout.textContent = String(profile.about || "").trim();
+    }
+  }
+  if (channelAboutEmpty) {
+    channelAboutEmpty.hidden = Boolean(String(profile.about || "").trim());
+  }
+
   if (channelBanner) {
     channelBanner.hidden = !banner;
   }
 
   if (channelBannerImage) {
     channelBannerImage.classList.remove("is-loaded");
+    channelBannerImage.dataset.token = String(localToken);
+    channelBannerImage.onload = () => {
+      if (String(channelBannerImage.dataset.token || "") !== String(localToken)) return;
+      channelBannerImage.classList.add("is-loaded");
+    };
+    channelBannerImage.onerror = () => {
+      if (String(channelBannerImage.dataset.token || "") !== String(localToken)) return;
+      if (channelBanner) channelBanner.hidden = true;
+      try {
+        channelBannerImage.removeAttribute("src");
+      } catch {}
+    };
     if (banner) {
-      channelBannerImage.dataset.token = String(localToken);
       channelBannerImage.src = banner;
-      channelBannerImage.addEventListener(
-        "load",
-        () => {
-          if (channelBannerImage.dataset.token !== String(channelRenderToken)) return;
-          channelBannerImage.classList.add("is-loaded");
-        },
-        { once: true }
-      );
     } else {
-      channelBannerImage.removeAttribute("src");
+      try {
+        channelBannerImage.removeAttribute("src");
+      } catch {}
+      channelBannerImage.dataset.token = "";
     }
   }
 
@@ -4312,8 +6695,12 @@ function updateWatchProgress() {
 function togglePlay() {
   if (!watchVideo) return;
   if (watchVideo.paused || watchVideo.ended) {
+    watchAutoplayWanted = true;
+    startWatchAutoplayRetryLoop();
     watchVideo.play().catch(() => {});
   } else {
+    watchAutoplayWanted = false;
+    stopWatchAutoplayRetryLoop();
     watchVideo.pause();
   }
 }
@@ -4722,7 +7109,7 @@ function decodeWatchSegment(value) {
 
 function parseAddressableVideoCoord(value) {
   const v = String(value || "").trim();
-  const m = v.match(/^(34235|34236):([0-9a-f]{64}):(.+)$/i);
+  const m = v.match(/^(30311|34235|34236):([0-9a-f]{64}):(.+)$/i);
   if (!m) return null;
   const kind = Number(m[1]);
   const pubkey = String(m[2] || "").toLowerCase();
@@ -4769,6 +7156,11 @@ async function fetchFirstEventFromRelays(relays, filter) {
     )
   );
   return found;
+}
+
+async function refineAddressableOriginalTimestamps(videoId, address, relays, seedEvent) {
+  // Disabled: prefer stable published timestamps without original-time refinement.
+  return;
 }
 
 async function fetchProfileFromRelays(relays, pubkey) {
@@ -4845,7 +7237,10 @@ async function ensureWatchVideoLoaded(route) {
     if (token !== watchLoadToken) return;
     if (!matches.length) {
       showToast("Video not found.");
-      if (token === watchLoadToken) window.location.hash = "#home";
+      if (watchStatus) {
+        watchStatus.textContent = "Video not found.";
+        watchStatus.hidden = false;
+      }
       return;
     }
 
@@ -4877,6 +7272,19 @@ async function ensureWatchVideoLoaded(route) {
       profilesCache.get(event.pubkey) ||
       (await fetchProfileFromRelays(relays, event.pubkey));
     if (profile) profilesCache.set(event.pubkey, profile);
+    try {
+      if (Number(video.kind) === 30311) {
+        const tmp = { ...video, nostrEventRaw: event };
+        const hostState = await getLiveHostVerificationState(tmp);
+        const hostPk = String(hostState?.pubkey || "");
+        if (hostPk && !profilesCache.get(hostPk)) {
+          const hostProfile = await fetchProfileFromRelays(relays, hostPk);
+          if (hostProfile) profilesCache.set(hostPk, hostProfile);
+        }
+        video.liveHostPubkey = hostPk;
+        video.liveHostVerified = Boolean(hostState?.verified);
+      }
+    } catch {}
     storeVideo(
       {
         ...video,
@@ -4885,7 +7293,8 @@ async function ensureWatchVideoLoaded(route) {
       },
       profile
     );
-    showWatchForVideo(videoStore.get(video.id));
+    const stored = videoStore.get(video.id);
+    showWatchForVideo(stored);
     return;
   }
 
@@ -4948,7 +7357,10 @@ async function ensureWatchVideoLoaded(route) {
   if (token !== watchLoadToken) return;
   if (!event) {
     showToast("Video not found on relays.");
-    window.location.hash = "#home";
+    if (watchStatus) {
+      watchStatus.textContent = "Video not found on relays.";
+      watchStatus.hidden = false;
+    }
     return;
   }
 
@@ -4992,9 +7404,19 @@ async function ensureWatchVideoLoaded(route) {
 function storeVideo(video, profile) {
   if (!video?.id) return;
   const existing = videoStore.get(video.id) || {};
-  videoStore.set(video.id, {
+  const nextOriginal = (() => {
+    const a = Number(existing.originalPublished || 0);
+    const b = Number(video.originalPublished || 0);
+    if (a && b) return Math.min(a, b);
+    if (a) return a;
+    if (b) return b;
+    const fallback = Number(video.published || existing.published || 0);
+    return fallback || 0;
+  })();
+  const next = {
     ...existing,
     ...video,
+    originalPublished: nextOriginal,
     nostrEventRaw:
       Object.prototype.hasOwnProperty.call(video, "nostrEventRaw") && video.nostrEventRaw != null
         ? video.nostrEventRaw
@@ -5014,10 +7436,23 @@ function storeVideo(video, profile) {
     channel: profile?.name || existing.channel || "Nostr creator",
     picture: profile?.picture || existing.picture || "",
     nip05: profile?.nip05 || existing.nip05 || "",
-  });
+  };
+
+  if (Number(next.kind) === 30311) {
+    const liveStarts = Number(next.liveStarts || 0);
+    if (liveStarts) {
+      next.published = liveStarts;
+    } else if (existing.published) {
+      next.published = existing.published;
+    } else if (next.published) {
+      next.published = Number(next.published || 0);
+    }
+  }
+
+  videoStore.set(video.id, next);
 }
 
- function hydrateRestrictedCardUi(clone, reason) {
+function hydrateRestrictedCardUi(clone, reason) {
   const title = clone.querySelector(".video-title, .short-title, .watch-item-title");
   const channel = clone.querySelector(".video-channel, .short-meta, .watch-item-channel");
   const time = clone.querySelector(".video-time");
@@ -5033,24 +7468,24 @@ function storeVideo(video, profile) {
   if (live) live.hidden = true;
   if (verified) verified.hidden = true;
   if (avatar) {
-   try {
-    avatar.classList.remove("has-image");
-   } catch {}
+    try {
+      avatar.classList.remove("has-image");
+    } catch {}
   }
   if (thumb) {
-   try {
-    thumb.style.backgroundImage = "";
-   } catch {}
+    try {
+      thumb.style.backgroundImage = "";
+    } catch {}
   }
   const card = clone.querySelector(".video-card, .short-card, .watch-item");
   if (card) {
-   card.dataset.restricted = "1";
-   card.dataset.restrictedReason = String(reason || "");
-   try {
-    card.removeAttribute("data-video-url");
-   } catch {}
+    card.dataset.restricted = "1";
+    card.dataset.restrictedReason = String(reason || "");
+    try {
+      card.removeAttribute("data-video-url");
+    } catch {}
   }
- }
+}
 
 function setWatchEventInspectorOpen(isOpen) {
   if (!watchEventPanel) return;
@@ -5088,77 +7523,80 @@ function populateWatchEventInspector(video) {
 function showWatchForVideo(video) {
   if (!video) return;
   if (video.restricted && !isRestrictedContentAllowed()) {
-   stopWatchPlayback();
-   lastWatchedVideoId = video.id;
-   watchLoadedVideoId = String(video.id || "");
-   if (miniPlayerTitle) miniPlayerTitle.textContent = "Restricted content";
-   if (miniPlayerVideo) {
-     try {
-       miniPlayerVideo.style.backgroundImage = "";
-     } catch {}
-   }
-   if (watchTitle) watchTitle.textContent = "Restricted content";
-   if (watchStats) watchStats.textContent = "Hidden by safety settings";
-   if (watchDesc) {
-     watchDesc.innerHTML = `This video is restricted. <button class="text-btn" type="button" data-open-settings="content">Open settings</button>`;
-   }
-   if (watchChannelName) watchChannelName.textContent = "Restricted uploader";
-   if (watchChannelMeta) watchChannelMeta.textContent = "Hidden by safety settings";
-   if (watchChannelAvatar) {
-     try {
-       hydrateAvatar(watchChannelAvatar, { name: "Restricted", picture: "" });
-     } catch {}
-   } else {
-     if (watchChannelInitials) watchChannelInitials.textContent = "";
-     if (watchChannelImage) {
-       try {
-         watchChannelImage.classList.remove("is-loaded");
-       } catch {}
-       try {
-         watchChannelImage.removeAttribute("src");
-       } catch {}
-     }
-   }
+    stopWatchPlayback();
+    lastWatchedVideoId = video.id;
+    watchLoadedVideoId = String(video.id || "");
+    if (miniPlayerTitle) miniPlayerTitle.textContent = "Restricted content";
+    if (miniPlayerVideo) {
+      try {
+        miniPlayerVideo.style.backgroundImage = "";
+      } catch {}
+    }
+    if (watchTitle) watchTitle.textContent = "Restricted content";
+    if (watchStats) watchStats.textContent = "Hidden by safety settings";
+    if (watchDesc) {
+      watchDesc.innerHTML = `This video is restricted. <button class="text-btn" type="button" data-open-settings="content">Open settings</button>`;
+    }
+    if (watchChannelName) watchChannelName.textContent = "Restricted uploader";
+    if (watchChannelMeta) watchChannelMeta.textContent = "Hidden by safety settings";
+    if (watchChannelAvatar) {
+      try {
+        hydrateAvatar(watchChannelAvatar, { name: "Restricted", picture: "" });
+      } catch {}
+    } else {
+      if (watchChannelInitials) watchChannelInitials.textContent = "";
+      if (watchChannelImage) {
+        try {
+          watchChannelImage.classList.remove("is-loaded");
+        } catch {}
+        try {
+          watchChannelImage.removeAttribute("src");
+        } catch {}
+      }
+    }
 
-   if (watchSubscribeBtn) {
-     watchSubscribeBtn.disabled = true;
-     watchSubscribeBtn.textContent = "Subscribe";
-   }
-   if (watchLikeBtn) watchLikeBtn.disabled = true;
-   if (watchDislikeBtn) watchDislikeBtn.disabled = true;
-   if (watchSaveBtn) watchSaveBtn.disabled = true;
-   if (watchShareBtn) watchShareBtn.disabled = true;
-   if (watchShareNative) watchShareNative.disabled = true;
-   if (watchShareLink) watchShareLink.disabled = true;
-   if (watchShareEmbed) watchShareEmbed.disabled = true;
-   if (watchEventBtn) watchEventBtn.disabled = true;
-   try {
-     closeMenu(watchShareMenu);
-   } catch {}
-
-   if (watchCommentInput) watchCommentInput.disabled = true;
-   if (watchCommentSend) watchCommentSend.disabled = true;
-   if (watchCommentsNote) {
-     watchCommentsNote.hidden = false;
-     watchCommentsNote.textContent = "Comments are disabled for restricted content.";
-   }
-   if (watchStatus) {
-    watchStatus.textContent = "Restricted content";
-    watchStatus.hidden = false;
-   }
-   if (watchPoster) {
+    if (watchSubscribeBtn) {
+      watchSubscribeBtn.disabled = true;
+      watchSubscribeBtn.textContent = "Subscribe";
+    }
+    if (watchLikeBtn) watchLikeBtn.disabled = true;
+    if (watchDislikeBtn) watchDislikeBtn.disabled = true;
+    if (watchSaveBtn) watchSaveBtn.disabled = true;
+    if (watchShareBtn) watchShareBtn.disabled = true;
+    if (watchShareNative) watchShareNative.disabled = true;
+    if (watchShareLink) watchShareLink.disabled = true;
+    if (watchShareEmbed) watchShareEmbed.disabled = true;
+    if (watchEventBtn) watchEventBtn.disabled = true;
     try {
-      watchPoster.style.backgroundImage = "";
+      closeMenu(watchShareMenu);
     } catch {}
-    watchPoster.classList.add("is-visible");
-   }
-   setWatchAspect(16, 9);
-   buildWatchList(video.id);
-   setActivePage(pageWatch);
-   return;
+
+    if (watchCommentInput) watchCommentInput.disabled = true;
+    if (watchCommentSend) watchCommentSend.disabled = true;
+    if (watchCommentsNote) {
+      watchCommentsNote.hidden = false;
+      watchCommentsNote.textContent = "Comments are disabled for restricted content.";
+    }
+    if (watchStatus) {
+      watchStatus.textContent = "Restricted content";
+      watchStatus.hidden = false;
+    }
+    if (watchPoster) {
+      try {
+        watchPoster.style.backgroundImage = "";
+      } catch {}
+      watchPoster.classList.add("is-visible");
+    }
+    setWatchAspect(16, 9);
+    buildWatchList(video.id);
+    setActivePage(pageWatch);
+    stopWatchCommentsPolling();
+    return;
   }
   lastWatchedVideoId = video.id;
   watchLoadedVideoId = String(video.id || "");
+  watchCommentsLoadToken += 1;
+  resetWatchCommentsUiForVideo(video);
   addToIdList(STORAGE_HISTORY, video.id, 200);
   if (!isMini) {
     miniLastHash = lastNonWatchHash || "#home";
@@ -5174,16 +7612,43 @@ function showWatchForVideo(video) {
   }
   if (watchTitle) watchTitle.textContent = video.title || "NosTube video";
   if (watchStats) {
-    watchStats.textContent = video.published
-      ? `${timeAgo(video.published)} · Nostr video`
-      : "Nostr video";
+    if (video.kind === 30311) {
+      const status = String(video.liveStatus || "").toLowerCase();
+      const label = status === "ended" ? "Ended stream" : "Live stream";
+      const pub = Number(video.published || 0);
+      watchStats.textContent = pub
+        ? `${timeAgo(pub)} · ${label}`
+        : label;
+    } else {
+      const pub = Number(video.published || 0);
+      watchStats.textContent = pub
+        ? `${timeAgo(pub)} · Nostr video`
+        : "Nostr video";
+    }
   }
   if (watchDesc) {
-    watchDesc.textContent = video.summary || "This video is powered by Nostr video events (NIP-71).";
+    if (video.kind === 30311) {
+      const nowPlaying = String(video.liveNowPlaying || "").trim();
+      const base = video.summary || "";
+      const alt = String(video.liveAlt || "").trim();
+      const combined = [nowPlaying, base, alt].filter(Boolean).join("\n\n");
+      watchDesc.textContent = combined;
+    } else {
+      try {
+        renderMentionsOnly(
+          watchDesc,
+          video.summary || "This video is powered by Nostr video events (NIP-71).",
+          profilesCache
+        );
+      } catch {
+        watchDesc.textContent = video.summary || "This video is powered by Nostr video events (NIP-71).";
+      }
+    }
   }
 
   const signedIn = Boolean(authState.pubkey);
-  if (watchDislikeBtn) watchDislikeBtn.disabled = !signedIn;
+  if (watchLikeBtn) watchLikeBtn.disabled = false;
+  if (watchDislikeBtn) watchDislikeBtn.disabled = false;
   if (watchShareBtn) watchShareBtn.disabled = false;
   if (watchShareNative) watchShareNative.disabled = false;
   if (watchShareLink) watchShareLink.disabled = false;
@@ -5222,6 +7687,26 @@ function showWatchForVideo(video) {
     }
   }
 
+  if (Number(video.kind) === 30311) {
+    try {
+      const hostPk = String(video.liveHostPubkey || "").trim();
+      const publisherPk = String(video.pubkey || "");
+      if (hostPk && hostPk !== publisherPk) {
+        const hostProfile = profilesCache.get(hostPk) || null;
+        const hostName = String(hostProfile?.name || "").trim() || shortenKey(hostPk);
+        const publisherName = video.channel || shortenKey(publisherPk);
+        if (watchChannelName) watchChannelName.textContent = hostName;
+        if (watchChannelMeta) watchChannelMeta.textContent = `via ${publisherName}`;
+        if (watchChannelAvatar) {
+          hydrateAvatar(watchChannelAvatar, {
+            name: hostName,
+            picture: hostProfile?.picture || "",
+          });
+        }
+      }
+    } catch {}
+  }
+
   if (watchPoster) {
     if (video.thumb) {
       watchPoster.style.backgroundImage = `url('${video.thumb}')`;
@@ -5252,6 +7737,8 @@ function showWatchForVideo(video) {
     watchVideo.volume = lastVolume;
     watchVideo.muted = false;
 
+    const isHlsAuto = guessMimeType(String(video.url || ""), String(video.mime || "")) === "application/vnd.apple.mpegurl";
+
     const shouldSuppress = suppressWatchAutoplayOnce;
     suppressWatchAutoplayOnce = false;
     if (shouldSuppress) {
@@ -5273,6 +7760,10 @@ function showWatchForVideo(video) {
         } catch {}
         setPlayState();
       } else {
+        if (isHlsAuto) {
+          watchAutoplayWanted = true;
+          startWatchAutoplayRetryLoop();
+        }
         watchVideo.play().catch(() => {
           if (watchStatus) {
             watchStatus.textContent = "Tap to play";
@@ -5282,6 +7773,10 @@ function showWatchForVideo(video) {
         });
       }
     } else {
+      if (isHlsAuto) {
+        watchAutoplayWanted = true;
+        startWatchAutoplayRetryLoop();
+      }
       watchVideo.play().catch(() => {
         if (watchStatus) {
           watchStatus.textContent = "Tap to play";
@@ -5292,11 +7787,34 @@ function showWatchForVideo(video) {
     }
   }
 
-  buildWatchList(video.id);
+  try {
+    buildWatchList(video.id);
+    ensureWatchListHasCandidates(video.id)
+      .then(() => {
+        const route = getRoute();
+        if (route.page !== "watch" && route.page !== "fullscreen") return;
+        const current = getCurrentWatchVideo();
+        if (!current?.id || current.id !== video.id) return;
+        buildWatchList(video.id);
+      })
+      .catch(() => {});
+  } catch {
+    // fall through
+  }
   setActivePage(pageWatch);
   updateSubscribeButton();
   setWatchLikeUi();
   setWatchSaveUi();
+  try {
+    loadWatchComments(video, { loadToken: watchCommentsLoadToken });
+    startWatchCommentsPolling(video);
+  } catch {}
+  try {
+    loadWatchLikeCount(video);
+  } catch {}
+  try {
+    ensureWatchReactionState(video);
+  } catch {}
 }
 
 function setMiniVisible(visible) {
@@ -5804,6 +8322,21 @@ function stopWatchPlayback() {
       watchVideo.load?.();
     } catch {}
   }
+
+  // Some platforms can keep playing the mini element if it was swapped/detached.
+  if (miniPlayerVideo) {
+    try {
+      miniPlayerVideo.pause();
+    } catch {}
+    try {
+      miniPlayerVideo.currentTime = 0;
+    } catch {}
+    try {
+      miniPlayerVideo.removeAttribute("src");
+      miniPlayerVideo.src = "";
+      miniPlayerVideo.load?.();
+    } catch {}
+  }
 }
 
 if (watchMinimizeBtn) {
@@ -5818,9 +8351,9 @@ if (watchPlayer) {
   watchPlayer.addEventListener(
     "touchstart",
     (event) => {
-    if (isMini) return;
-    if (!isMobileUi()) return;
-    handleMiniTouchStart(event);
+      if (isMini) return;
+      if (!isMobileUi()) return;
+      handleMiniTouchStart(event);
     },
     { passive: true }
   );
@@ -5855,8 +8388,8 @@ if (watchPlayer) {
   watchPlayer.addEventListener(
     "touchend",
     (event) => {
-    if (isMini) return;
-    handleMiniTouchEnd(event, "down");
+      if (isMini) return;
+      handleMiniTouchEnd(event, "down");
     },
     { passive: true }
   );
@@ -5889,9 +8422,9 @@ if (miniPlayer) {
   miniPlayer.addEventListener(
     "touchstart",
     (event) => {
-    if (!isMini) return;
-    if (!isMobileUi()) return;
-    handleMiniTouchStart(event);
+      if (!isMini) return;
+      if (!isMobileUi()) return;
+      handleMiniTouchStart(event);
     },
     { passive: true }
   );
@@ -5922,8 +8455,8 @@ if (miniPlayer) {
   miniPlayer.addEventListener(
     "touchend",
     (event) => {
-    if (!isMini) return;
-    handleMiniTouchEnd(event, "up");
+      if (!isMini) return;
+      handleMiniTouchEnd(event, "up");
     },
     { passive: true }
   );
@@ -5993,27 +8526,6 @@ function resetPageScroll() {
   } catch {}
 }
 
-if (watchLikeBtn) {
-  watchLikeBtn.addEventListener("click", () => {
-    const video = getCurrentWatchVideo();
-    if (!video?.id) return;
-    if (!authState.pubkey) {
-      showToast("Sign in to like videos");
-      openAuthModal("chooser");
-      return;
-    }
-    if (hasInIdList(STORAGE_LIKED, video.id)) {
-      removeFromIdList(STORAGE_LIKED, video.id);
-      showToast("Removed like");
-    } else {
-      addToIdList(STORAGE_LIKED, video.id, 500);
-      showToast("Liked");
-    }
-    setWatchLikeUi();
-    renderLocalPages();
-  });
-}
-
 if (watchSaveBtn) {
   watchSaveBtn.addEventListener("click", () => {
     const video = getCurrentWatchVideo();
@@ -6038,66 +8550,100 @@ if (watchSaveBtn) {
 function showChannel(pubkey) {
   if (!channelFeed || !channelEmpty) return;
   const targetPubkey = String(pubkey || "");
+  if (currentChannelPubkey && currentChannelPubkey !== targetPubkey) {
+    currentChannelTabKey = "videos";
+  }
   currentChannelPubkey = targetPubkey;
   const token = ++channelRenderToken;
 
-  channelFeed.innerHTML = "";
-  setChannelHeaderLoading(targetPubkey);
-  const videos = Array.from(videoStore.values()).filter((video) => video.pubkey === targetPubkey);
-  const visibleVideos = videos.filter((video) => !(video.restricted && !isRestrictedContentAllowed()));
-  if (!visibleVideos.length) {
-    channelEmpty.textContent = "No videos for this channel yet.";
-    channelEmpty.hidden = false;
-  } else {
-    channelEmpty.hidden = true;
-    visibleVideos.forEach((video) => {
-      const clone = videoTemplate.content.cloneNode(true);
-      const card = clone.querySelector(".video-card");
-      const thumb = clone.querySelector(".thumbnail");
-      const duration = clone.querySelector(".duration");
-      const title = clone.querySelector(".video-title");
-      const channel = clone.querySelector(".video-channel");
-      const time = clone.querySelector(".video-time");
-      const avatar = clone.querySelector(".channel-avatar");
-      const verified = clone.querySelector(".verified");
+  try {
+    if (profilesCache.has(targetPubkey)) {
+      const st = channelProfileFetchState.get(targetPubkey) || {};
+      if (!st.hasFetched) channelProfileFetchState.set(targetPubkey, { ...st, inFlight: null, hasFetched: true });
+    }
+  } catch {}
 
-      title.textContent = video.title;
-      channel.textContent = video.channel;
-      time.textContent = timeAgo(video.published);
-      duration.textContent = video.duration || "0:00";
-      if (!video.durationSeconds) {
-        duration.hidden = true;
-      }
-      setCardThumb(thumb, video.thumb, video.id);
-      hydrateAvatar(avatar, {
-        name: video.channel,
-        picture: video.picture,
-      });
-      if (!video.nip05) {
-        verified.hidden = true;
-      }
-      card.dataset.videoId = video.id;
-      card.dataset.videoTitle = video.title;
-      card.dataset.videoChannel = video.channel;
-      card.dataset.videoTime = timeAgo(video.published);
-      card.dataset.videoSummary = video.summary || "";
-      card.dataset.videoThumb = video.thumb || "";
-      card.dataset.videoUrl = video.url || "";
-      card.dataset.videoMime = video.mime || "";
-      card.dataset.videoPicture = video.picture || "";
-      card.dataset.videoNip05 = video.nip05 || "";
-      card.dataset.videoPubkey = video.pubkey || "";
-      channelFeed.appendChild(clone);
+  setChannelHeaderLoading(targetPubkey);
+  renderChannelPanelsFromStore(targetPubkey);
+  const existingProfile = channelProfileFetchState.get(targetPubkey) || { inFlight: null, hasFetched: false };
+  if (!existingProfile.inFlight) {
+    let resolveDone = null;
+    const inFlight = new Promise((resolve) => {
+      resolveDone = resolve;
     });
+    channelProfileFetchState.set(targetPubkey, { ...existingProfile, inFlight });
+    ensureProfiles([targetPubkey])
+      .then(() => {
+        if (token !== channelRenderToken) return;
+        renderChannelHeader(targetPubkey, token);
+      })
+      .catch(() => {})
+      .finally(() => {
+        const st = channelProfileFetchState.get(targetPubkey) || {};
+        channelProfileFetchState.set(targetPubkey, { ...st, inFlight: null, hasFetched: true });
+        try {
+          resolveDone?.();
+        } catch {}
+        try {
+          if (token === channelRenderToken) renderChannelPanelsFromStore(targetPubkey);
+        } catch {}
+      });
   }
-  updateChannelActions(targetPubkey);
-  ensureProfiles([targetPubkey])
+  if (existingProfile.inFlight) {
+    Promise.resolve(existingProfile.inFlight)
+      .catch(() => {})
+      .finally(() => {
+        const st = channelProfileFetchState.get(targetPubkey) || {};
+        channelProfileFetchState.set(targetPubkey, { ...st, inFlight: null, hasFetched: true });
+        if (token !== channelRenderToken) return;
+        try {
+          renderChannelHeader(targetPubkey, token);
+        } catch {}
+        try {
+          renderChannelPanelsFromStore(targetPubkey);
+        } catch {}
+      });
+  }
+  setActivePage(pageChannel);
+
+  Promise.all([
+    Promise.resolve().then(() => ensureChannelVideosLoaded(targetPubkey, token)),
+    Promise.resolve().then(() => ensureChannelLiveEventsLoaded(targetPubkey, token)),
+  ])
     .then(() => {
       if (token !== channelRenderToken) return;
-      renderChannelHeader(targetPubkey, token);
+      // Always rerender after fetches settle so Loading… resolves even when there are 0 items.
+      const st = channelFetchState.get(targetPubkey) || {};
+      channelFetchState.set(targetPubkey, { ...st, hasNew: false });
+      const lst = channelLiveFetchState.get(targetPubkey) || {};
+      channelLiveFetchState.set(targetPubkey, { ...lst, hasNew: false });
+      renderChannelPanelsFromStore(targetPubkey);
     })
     .catch(() => {});
-  setActivePage(pageChannel);
+}
+
+if (channelTabVideos) {
+  channelTabVideos.addEventListener("click", () => {
+    setChannelTab("videos");
+  });
+}
+
+if (channelTabShorts) {
+  channelTabShorts.addEventListener("click", () => {
+    setChannelTab("shorts");
+  });
+}
+
+if (channelTabLive) {
+  channelTabLive.addEventListener("click", () => {
+    setChannelTab("live");
+  });
+}
+
+if (channelTabAbout) {
+  channelTabAbout.addEventListener("click", () => {
+    setChannelTab("about");
+  });
 }
 
 function handleRoute() {
@@ -6329,7 +8875,13 @@ function handleRoute() {
   }
   if (route.page === "channel") {
     if (route.id) {
-      showChannel(route.id);
+      try {
+        showChannel(route.id);
+      } catch (error) {
+        console.error(error);
+        showToast("Unable to open channel right now.");
+        setActivePage(pageHome);
+      }
     } else {
       setActivePage(pageHome);
     }
@@ -6349,7 +8901,8 @@ if (watchChannelName) {
       showToast("Restricted content");
       return;
     }
-    navigateFromWatchTo(`#channel/${video.pubkey}`);
+    const hostPk = String(video.liveHostPubkey || "").trim();
+    navigateFromWatchTo(`#channel/${hostPk || video.pubkey}`);
   });
 }
 
@@ -6361,7 +8914,8 @@ if (watchChannelAvatar) {
       showToast("Restricted content");
       return;
     }
-    navigateFromWatchTo(`#channel/${video.pubkey}`);
+    const hostPk = String(video.liveHostPubkey || "").trim();
+    navigateFromWatchTo(`#channel/${hostPk || video.pubkey}`);
   });
 }
 
@@ -6526,16 +9080,38 @@ function formatDuration(seconds) {
 
 function timeAgo(timestamp) {
   const now = Date.now() / 1000;
-  const diff = Math.max(0, now - timestamp);
+  const ts = Number(timestamp || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  if (ts > now + 60) return "Just now";
+  const diff = Math.max(0, now - ts);
   const minutes = Math.floor(diff / 60);
   const hours = Math.floor(diff / 3600);
   const days = Math.floor(diff / 86400);
-  if (minutes < 60) return `${minutes || 1} min ago`;
-  if (hours < 24) return `${hours} hours ago`;
-  if (days < 7) return `${days} days ago`;
+  const date = new Date(ts * 1000);
+
+  const unit = (n, singular) => `${n} ${singular}${n === 1 ? "" : "s"} ago`;
+
+  if (minutes < 1) {
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+  if (minutes < 60) {
+    return unit(minutes, "min");
+  }
+  if (hours < 24) {
+    return unit(hours, "hour");
+  }
+  if (days < 7) {
+    return unit(days, "day");
+  }
   const weeks = Math.floor(days / 7);
-  if (weeks < 4) return `${weeks} weeks ago`;
-  const date = new Date(timestamp * 1000);
+  if (weeks < 5) {
+    return unit(weeks, "week");
+  }
+
+  const years = Math.floor(days / 365);
+  if (years >= 1) {
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
@@ -6658,6 +9234,48 @@ function setCardThumb(thumbEl, url, seed) {
 }
 
 function parseVideoEvent(event) {
+  if (event?.kind === 30311) {
+    const tags = event.tags || [];
+    const title = getTagValue(tags, "title") || "Live stream";
+    const summary = getTagValue(tags, "summary") || "";
+    const thumb = getTagValue(tags, "image") || getTagValue(tags, "thumb") || "";
+    const status = String(getTagValue(tags, "status") || "").trim().toLowerCase();
+    const starts = Number(getTagValue(tags, "starts")) || 0;
+    const ends = Number(getTagValue(tags, "ends")) || 0;
+    const participants = Number(getTagValue(tags, "current_participants")) || 0;
+    const nowPlaying = String(event.content || "").trim();
+    const alt = String(getTagValue(tags, "alt") || "").trim();
+    const streaming = String(getTagValue(tags, "streaming") || "").trim();
+    const recording = String(getTagValue(tags, "recording") || "").trim();
+    const dTag = String(getTagValue(tags, "d") || "").trim();
+    const address = dTag ? `30311:${event.pubkey}:${dTag}` : "";
+    const url = pickLive30311Url({ status, streaming, recording });
+    const mimeHint = url && url.toLowerCase().includes(".m3u8") ? "application/vnd.apple.mpegurl" : "";
+    return {
+      id: address || String(event.id || ""),
+      address,
+      kind: event.kind,
+      pubkey: event.pubkey,
+      title,
+      summary,
+      thumb,
+      duration: "",
+      durationSeconds: 0,
+      published: starts || event.created_at,
+      url,
+      mime: mimeHint,
+      liveStatus: status,
+      liveStarts: starts,
+      liveEnds: ends,
+      liveParticipants: participants,
+      liveNowPlaying: nowPlaying,
+      liveAlt: alt,
+      liveStreaming: streaming,
+      liveRecording: recording,
+      restricted: false,
+      restrictedReason: "",
+    };
+  }
   const tags = event.tags || [];
   const content = event.content || "";
   const rUrl = tags.find(
@@ -6715,7 +9333,7 @@ function parseVideoEvent(event) {
 
 function getVideoEventKey(event) {
   if (!event) return "";
-  if (event.kind === 34235 || event.kind === 34236) {
+  if (event.kind === 30311 || event.kind === 34235 || event.kind === 34236) {
     const dTag = getTagValue(event.tags || [], "d");
     if (dTag) return `${event.kind}:${event.pubkey}:${dTag}`;
   }
@@ -6799,12 +9417,17 @@ function setVideoSource(video, url, mime) {
 
 function loadWatchVideo(url, mimeHint) {
   if (!watchVideo) return;
+  watchHlsRetryAt = 0;
+  watchHlsRetryCount = 0;
   teardownWatchPlayer();
   if (!url) return;
   watchVideo.preload = "metadata";
   watchVideo.playsInline = true;
   const mime = guessMimeType(url, mimeHint);
   const isHls = mime === "application/vnd.apple.mpegurl";
+  watchLastLoadUrl = String(url || "");
+  watchLastLoadMime = String(mime || "");
+  watchLastIsHls = Boolean(isHls);
   if (isHls && watchVideo.canPlayType(mime)) {
     watchVideo.src = url;
     watchVideo.load();
@@ -6812,6 +9435,74 @@ function loadWatchVideo(url, mimeHint) {
   }
   if (isHls && window.Hls && window.Hls.isSupported()) {
     watchHls = new window.Hls({ enableWorker: true, lowLatencyMode: true });
+    try {
+      watchHls.on(window.Hls.Events.ERROR, (_, data) => {
+        try {
+          if (!data) return;
+          if (data.fatal) {
+            if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+              if (watchStatus) {
+                watchStatus.textContent = "Reconnecting…";
+                watchStatus.hidden = false;
+              }
+              try {
+                watchHls.startLoad();
+              } catch {}
+              return;
+            }
+            if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
+              if (watchStatus) {
+                watchStatus.textContent = "Recovering playback…";
+                watchStatus.hidden = false;
+              }
+              try {
+                watchHls.recoverMediaError();
+              } catch {}
+              return;
+            }
+
+            // Unknown fatal error: attempt a bounded full reload before giving up.
+            try {
+              const now = Date.now();
+              const canRetry = watchLastLoadUrl && now - watchHlsRetryAt > 12_000 && watchHlsRetryCount < 2;
+              if (canRetry) {
+                watchHlsRetryAt = now;
+                watchHlsRetryCount += 1;
+                if (watchStatus) {
+                  watchStatus.textContent = "Retrying stream…";
+                  watchStatus.hidden = false;
+                }
+                try {
+                  watchHls.destroy();
+                } catch {}
+                watchHls = null;
+                loadWatchVideo(watchLastLoadUrl, watchLastLoadMime);
+                try {
+                  maybeAutoPlayWatchVideo();
+                } catch {}
+                return;
+              }
+            } catch {}
+            try {
+              watchHls.destroy();
+            } catch {}
+            watchHls = null;
+            if (watchStatus) {
+              watchStatus.textContent = "This stream failed to load.";
+              watchStatus.hidden = false;
+            }
+          }
+        } catch {}
+      });
+    } catch {}
+    try {
+      watchHls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        try {
+          startWatchAutoplayRetryLoop();
+          maybeAutoPlayWatchVideo();
+        } catch {}
+      });
+    } catch {}
     watchHls.loadSource(url);
     watchHls.attachMedia(watchVideo);
     return;
@@ -6864,8 +9555,13 @@ function requestEvents(relayUrl, filter, onEvent) {
 }
 
 async function fetchNostrEvents(kinds, limit) {
-  const since = Math.floor(Date.now() / 1000) - MAX_EVENT_AGE_DAYS * 86400;
-  const filter = { kinds, limit, since };
+  const normalizedKinds = Array.isArray(kinds) ? kinds.filter((k) => Number.isFinite(Number(k))) : [];
+  const omitSince = normalizedKinds.includes(30311);
+  const since = omitSince ? 0 : Math.floor(Date.now() / 1000) - MAX_EVENT_AGE_DAYS * 86400;
+  const filter = { kinds: normalizedKinds, limit };
+  if (!omitSince) {
+    filter.since = since;
+  }
   const events = new Map();
   await Promise.all(
     getReadRelays().map((relay) =>
@@ -6966,7 +9662,10 @@ function renderVideos(container, emptyState, events, profiles) {
     return;
   }
   if (emptyState) emptyState.hidden = true;
-  out.forEach(({ video }) => {
+  out
+    .slice()
+    .sort((a, b) => Number(b.video?.published || 0) - Number(a.video?.published || 0))
+    .forEach(({ event, video }) => {
     const clone = videoTemplate.content.cloneNode(true);
     const card = clone.querySelector(".video-card");
     const thumb = clone.querySelector(".thumbnail");
@@ -6978,9 +9677,30 @@ function renderVideos(container, emptyState, events, profiles) {
     const avatar = clone.querySelector(".channel-avatar");
     const verified = clone.querySelector(".verified");
 
-    const profile = profiles.get(video.pubkey);
-    const channelName = profile?.name || shortenKey(video.pubkey);
-    storeVideo(video, profile);
+    const publisherPk = String(video.pubkey || "");
+    const publisherProfile = profiles.get(publisherPk);
+
+    // For NIP-53 streams (30311), display the host as the channel when present,
+    // without requiring proof.
+    let displayPk = publisherPk;
+    let displayProfile = publisherProfile;
+    if (Number(event?.kind) === 30311) {
+      try {
+        const tmp = { ...video, kind: 30311, nostrEventRaw: event };
+        const hostPk = String(getLiveHostPubkeyFrom30311(tmp) || "").trim();
+        if (hostPk) {
+          displayPk = hostPk;
+          displayProfile = profilesCache.get(hostPk) || profiles.get(hostPk) || null;
+          if (!displayProfile) {
+            displayProfile = { name: shortenKey(hostPk), picture: "", nip05: "" };
+          }
+          video.liveHostPubkey = hostPk;
+        }
+      } catch {}
+    }
+
+    const channelName = String(displayProfile?.name || "").trim() || shortenKey(displayPk);
+    storeVideo(video, publisherProfile);
 
     title.textContent = video.title;
     channel.textContent = channelName;
@@ -6992,15 +9712,27 @@ function renderVideos(container, emptyState, events, profiles) {
 
     setCardThumb(thumb, video.thumb, video.id);
 
-    if ((event.kind === 21 || event.kind === 34235) && event.tags?.some((tag) => tag[0] === "live")) {
+    if (
+      ((event.kind === 21 || event.kind === 34235) && event.tags?.some((tag) => tag[0] === "live")) ||
+      event.kind === 30311
+    ) {
       live.hidden = false;
+      if (event.kind === 30311) {
+        const status = String(video.liveStatus || "").toLowerCase();
+        const isEnded = status === "ended";
+        live.textContent = isEnded ? "ENDED" : "LIVE";
+        live.classList.toggle("is-ended", isEnded);
+      } else {
+        live.textContent = "LIVE";
+        live.classList.remove("is-ended");
+      }
     }
 
-    if (!profile?.nip05) {
+    if (!displayProfile?.nip05) {
       verified.hidden = true;
     }
 
-    hydrateAvatar(avatar, profile);
+    hydrateAvatar(avatar, displayProfile);
     card.dataset.videoUrl = video.url || "";
     card.dataset.videoMime = video.mime || "";
     card.dataset.videoId = video.id;
@@ -7009,10 +9741,9 @@ function renderVideos(container, emptyState, events, profiles) {
     card.dataset.videoTime = timeAgo(video.published);
     card.dataset.videoSummary = video.summary || "";
     card.dataset.videoThumb = video.thumb || "";
-    card.dataset.videoPicture = profile?.picture || "";
-    card.dataset.videoNip05 = profile?.nip05 || "";
-    card.dataset.videoPubkey = video.pubkey || "";
-    card.dataset.videoPubkey = video.pubkey || "";
+    card.dataset.videoPicture = displayProfile?.picture || "";
+    card.dataset.videoNip05 = displayProfile?.nip05 || "";
+    card.dataset.videoPubkey = displayPk || "";
     container.appendChild(clone);
   });
 }
@@ -7043,7 +9774,10 @@ function renderShorts(container, emptyState, events, profiles) {
     return;
   }
   if (emptyState) emptyState.hidden = true;
-  out.forEach(({ video }) => {
+  out
+    .slice()
+    .sort((a, b) => Number(b.video?.published || 0) - Number(a.video?.published || 0))
+    .forEach(({ video }) => {
     const clone = shortTemplate.content.cloneNode(true);
     const card = clone.querySelector(".short-card");
     const thumb = clone.querySelector(".short-thumb");
@@ -7074,21 +9808,72 @@ function renderShorts(container, emptyState, events, profiles) {
 async function initNostrFeed() {
   if (!recommendedFeed || !latestFeed || !shortsGrid) return;
   try {
-    const [videos, shorts] = await Promise.all([
-      fetchNostrEvents([21, 34235], FEED_LIMIT * 2),
+    const [videoEvents, liveEventsRaw, shorts] = await Promise.all([
+      fetchNostrEvents([21, 34235], FEED_LIMIT * 4),
+      fetchNostrEvents([30311], FEED_LIMIT * 6),
       fetchNostrEvents([22, 34236], SHORTS_LIMIT),
     ]);
+
+    const liveByKey = new Map();
+    (liveEventsRaw || []).forEach((event) => {
+      if (!event?.id) return;
+      const tags = event.tags || [];
+      const status = String(getTagValue(tags, "status") || "").trim().toLowerCase();
+      if (status === "ended") return;
+      const streaming = String(getTagValue(tags, "streaming") || "").trim();
+      const recording = String(getTagValue(tags, "recording") || "").trim();
+      const alt = String(getTagValue(tags, "alt") || "").trim();
+      if (!isDisplayableLive30311FromTags({ status, streaming, recording, alt }, { allowExternal: false })) return;
+      const d = String(getTagValue(tags, "d") || "").trim();
+      const key = d ? `${event.pubkey}:${d}` : String(event.id);
+      const existing = liveByKey.get(key);
+      if (!existing || Number(event.created_at || 0) > Number(existing.created_at || 0)) {
+        liveByKey.set(key, event);
+      }
+    });
+    const liveEvents = Array.from(liveByKey.values());
+
+    const maxLive = Math.max(2, Math.floor(FEED_LIMIT * 0.4));
+    const cappedLive = liveEvents
+      .slice()
+      .sort((a, b) => b.created_at - a.created_at)
+      .slice(0, maxLive);
+
+    const merged = dedupeVideoEventsByKey(
+      [...(videoEvents || []), ...cappedLive].sort((a, b) => b.created_at - a.created_at)
+    );
+
+    // Prefetch host profiles so 30311 cards can show host name/picture immediately.
+    try {
+      const hostPubkeys = new Set();
+      (cappedLive || []).forEach((ev) => {
+        try {
+          if (Number(ev?.kind) !== 30311) return;
+          const tmp = { kind: 30311, nostrEventRaw: ev };
+          const hostPk = String(getLiveHostPubkeyFrom30311(tmp) || "").trim();
+          if (hostPk) hostPubkeys.add(hostPk);
+        } catch {}
+      });
+      const missingHosts = Array.from(hostPubkeys).filter((pk) => pk && !profilesCache.get(pk));
+      if (missingHosts.length) {
+        const hostProfiles = await fetchProfiles(missingHosts);
+        hostProfiles.forEach((value, key) => profilesCache.set(key, value));
+      }
+    } catch {}
+
     const profiles = await fetchProfiles([
-      ...new Set([...videos, ...shorts].map((event) => event.pubkey)),
+      ...new Set([...merged, ...shorts].map((event) => event.pubkey)),
     ]);
     profiles.forEach((value, key) => profilesCache.set(key, value));
-    const recommended = videos.slice(0, FEED_LIMIT);
-    const latest = videos.slice(FEED_LIMIT, FEED_LIMIT * 2);
+    const recommended = merged.slice(0, FEED_LIMIT);
+    const latest = merged.slice(FEED_LIMIT, FEED_LIMIT * 2);
     renderVideos(recommendedFeed, recommendedEmpty, recommended, profiles);
     renderVideos(latestFeed, latestEmpty, latest, profiles);
-    renderShorts(shortsGrid, shortsEmpty, shorts.slice(0, SHORTS_LIMIT), profiles);
-    handleRoute();
-  } catch (error) {
+    renderShorts(shortsGrid, shortsEmpty, shorts, profiles);
+  } catch {
+    recommendedFeed.innerHTML = "";
+    latestFeed.innerHTML = "";
+    shortsGrid.innerHTML = "";
     if (recommendedEmpty) {
       recommendedEmpty.textContent = "Unable to load videos right now.";
       recommendedEmpty.hidden = false;
@@ -7282,10 +10067,19 @@ restoreAuth().then(updateAuthUi).catch(() => {});
 function buildWatchList(activeId) {
   if (!watchList || !watchItemTemplate) return;
   watchList.innerHTML = "";
-  Array.from(videoStore.values())
+  const candidates = Array.from(videoStore.values())
     .filter((video) => video.id && video.id !== activeId)
-    .slice(0, 12)
-    .forEach((video) => {
+    .slice(0, 12);
+
+  if (!candidates.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No other videos yet.";
+    watchList.appendChild(empty);
+    return;
+  }
+
+  candidates.forEach((video) => {
       if (video.restricted && !isRestrictedContentAllowed()) return;
       const clone = watchItemTemplate.content.cloneNode(true);
       const item = clone.querySelector(".watch-item");
@@ -7376,7 +10170,21 @@ wireVideoClicks(recommendedFeed);
 wireVideoClicks(latestFeed);
 wireVideoClicks(shortsGrid);
 wireVideoClicks(channelFeed);
+wireVideoClicks(channelShortsGrid);
+wireVideoClicks(channelLiveFeed);
 wireVideoClicks(searchFeed);
+
+if (channelTabs) {
+  channelTabs.addEventListener("click", (event) => {
+    const btn = event.target.closest(".channel-tab");
+    if (!btn) return;
+    const id = btn.id || "";
+    if (id === "channel-tab-videos") setChannelTab("videos");
+    else if (id === "channel-tab-shorts") setChannelTab("shorts");
+    else if (id === "channel-tab-live") setChannelTab("live");
+    else if (id === "channel-tab-about") setChannelTab("about");
+  });
+}
 
 document.addEventListener("click", (event) => {
   const btn = event.target.closest("[data-open-settings]");
@@ -7792,9 +10600,47 @@ if (watchLikeBtn) {
         openAuthModal("chooser");
         return;
       }
-      const route = getRoute();
-      const video = route.page === "watch" ? videoStore.get(route.id) : null;
+      const video = getCurrentWatchVideo();
       if (!video?.id) return;
+
+      const alreadyLiked = hasInIdList(STORAGE_LIKED, video.id);
+      const alreadyDisliked = hasInIdList(STORAGE_DISLIKED, video.id);
+
+      // Toggle off like.
+      if (alreadyLiked) {
+        if (!watchUserLikeEventId) {
+          await ensureWatchReactionState(video);
+        }
+        if (!watchUserLikeEventId) {
+          showToast("Unable to find your like to remove.");
+          return;
+        }
+        await deleteWatchReaction(watchUserLikeEventId, watchUserLikeRelayHint);
+        removeFromIdList(STORAGE_LIKED, video.id);
+        watchUserLikeEventId = "";
+        watchUserLikeRelayHint = "";
+        showToast("Unliked");
+        setWatchLikeUi();
+        renderLocalPages();
+        try {
+          loadWatchLikeCount(video);
+        } catch {}
+        return;
+      }
+
+      // If they previously disliked, remove it first (mutually exclusive).
+      if (alreadyDisliked) {
+        if (!watchUserDislikeEventId) {
+          await ensureWatchReactionState(video);
+        }
+        if (watchUserDislikeEventId) {
+          await deleteWatchReaction(watchUserDislikeEventId, watchUserDislikeRelayHint);
+        }
+        removeFromIdList(STORAGE_DISLIKED, video.id);
+        watchUserDislikeEventId = "";
+        watchUserDislikeRelayHint = "";
+      }
+
       const tags = [
         video.address ? ["a", video.address] : ["e", video.id],
         ["p", video.pubkey],
@@ -7802,9 +10648,96 @@ if (watchLikeBtn) {
       const unsigned = buildUnsignedEvent(7, "+", tags);
       const signed = await signEvent(unsigned);
       await publishEvent(signed);
+
+      if (!hasInIdList(STORAGE_LIKED, video.id)) {
+        addToIdList(STORAGE_LIKED, video.id, 500);
+      }
+      watchUserLikeEventId = String(signed?.id || "");
+      watchUserLikeRelayHint = getPreferredRelayHint();
       showToast("Liked");
+      setWatchLikeUi();
+      setWatchDislikeUi();
+      renderLocalPages();
+      try {
+        loadWatchLikeCount(video);
+      } catch {}
     } catch (error) {
       showToast(error?.message || "Like failed");
+    }
+  });
+}
+
+if (watchDislikeBtn) {
+  watchDislikeBtn.addEventListener("click", async () => {
+    try {
+      if (!authState.pubkey) {
+        showToast("Sign in to dislike");
+        openAuthModal("chooser");
+        return;
+      }
+      const video = getCurrentWatchVideo();
+      if (!video?.id) return;
+
+      const alreadyDisliked = hasInIdList(STORAGE_DISLIKED, video.id);
+      const alreadyLiked = hasInIdList(STORAGE_LIKED, video.id);
+
+      // Toggle off dislike.
+      if (alreadyDisliked) {
+        if (!watchUserDislikeEventId) {
+          await ensureWatchReactionState(video);
+        }
+        if (!watchUserDislikeEventId) {
+          showToast("Unable to find your dislike to remove.");
+          return;
+        }
+        await deleteWatchReaction(watchUserDislikeEventId, watchUserDislikeRelayHint);
+        removeFromIdList(STORAGE_DISLIKED, video.id);
+        watchUserDislikeEventId = "";
+        watchUserDislikeRelayHint = "";
+        showToast("Undisliked");
+        setWatchDislikeUi();
+        renderLocalPages();
+        try {
+          loadWatchLikeCount(video);
+        } catch {}
+        return;
+      }
+
+      // If they previously liked, remove it first (mutually exclusive).
+      if (alreadyLiked) {
+        if (!watchUserLikeEventId) {
+          await ensureWatchReactionState(video);
+        }
+        if (watchUserLikeEventId) {
+          await deleteWatchReaction(watchUserLikeEventId, watchUserLikeRelayHint);
+        }
+        removeFromIdList(STORAGE_LIKED, video.id);
+        watchUserLikeEventId = "";
+        watchUserLikeRelayHint = "";
+      }
+
+      const tags = [
+        video.address ? ["a", video.address] : ["e", video.id],
+        ["p", video.pubkey],
+      ];
+      const unsigned = buildUnsignedEvent(7, "-", tags);
+      const signed = await signEvent(unsigned);
+      await publishEvent(signed);
+
+      if (!hasInIdList(STORAGE_DISLIKED, video.id)) {
+        addToIdList(STORAGE_DISLIKED, video.id, 500);
+      }
+      watchUserDislikeEventId = String(signed?.id || "");
+      watchUserDislikeRelayHint = getPreferredRelayHint();
+      showToast("Disliked");
+      setWatchDislikeUi();
+      setWatchLikeUi();
+      renderLocalPages();
+      try {
+        loadWatchLikeCount(video);
+      } catch {}
+    } catch (error) {
+      showToast(error?.message || "Dislike failed");
     }
   });
 }
@@ -7819,18 +10752,27 @@ if (watchCommentSend) {
       }
       const text = String(watchCommentInput?.value || "").trim();
       if (!text) return;
-      const route = getRoute();
-      const video = route.page === "watch" ? videoStore.get(route.id) : null;
+      const video = getCurrentWatchVideo();
       if (!video?.id) return;
-      const tags = [
-        video.address ? ["a", video.address] : ["e", video.id],
-        ["p", video.pubkey],
-      ];
-      const unsigned = buildUnsignedEvent(1, text, tags);
+
+      let unsigned = null;
+      if (video.kind === 30311) {
+        const addr = String(video.address || video.id || "");
+        if (!addr) return;
+        unsigned = buildUnsignedEvent(1311, text, [["a", addr, "", "root"]]);
+      } else {
+        unsigned = buildUnsignedVideoComment1111(video, text);
+        if (!unsigned) return;
+      }
+
       const signed = await signEvent(unsigned);
       await publishEvent(signed);
       if (watchCommentInput) watchCommentInput.value = "";
+      if (watchCommentInput) autoResizeTextarea(watchCommentInput, 180);
       showToast("Comment posted");
+      try {
+        await loadWatchComments(video);
+      } catch {}
     } catch (error) {
       showToast(error?.message || "Comment failed");
     }
@@ -7913,6 +10855,9 @@ if (watchVideo) {
   watchVideo.addEventListener("volumechange", setVolumeState);
   watchVideo.addEventListener("playing", () => {
     if (watchPoster) watchPoster.classList.remove("is-visible");
+    watchHlsRetryAt = 0;
+    watchHlsRetryCount = 0;
+    stopWatchAutoplayRetryLoop();
     if (watchStatus) {
       watchStatus.textContent = "";
       watchStatus.hidden = true;
@@ -7931,10 +10876,36 @@ if (watchVideo) {
     }
   });
   watchVideo.addEventListener("error", () => {
-    if (watchStatus) {
-      watchStatus.textContent = "This video format is not supported.";
+    if (!watchStatus) return;
+    if (watchLastIsHls) {
+      const now = Date.now();
+      const canRetry = watchLastLoadUrl && now - watchHlsRetryAt > 12_000 && watchHlsRetryCount < 2;
+      if (canRetry) {
+        watchHlsRetryAt = now;
+        watchHlsRetryCount += 1;
+        watchStatus.textContent = "Retrying stream…";
+        watchStatus.hidden = false;
+        try {
+          if (watchHls) {
+            try {
+              watchHls.destroy();
+            } catch {}
+            watchHls = null;
+          }
+          loadWatchVideo(watchLastLoadUrl, watchLastLoadMime);
+          try {
+            startWatchAutoplayRetryLoop();
+            maybeAutoPlayWatchVideo();
+          } catch {}
+          return;
+        } catch {}
+      }
+      watchStatus.textContent = "Unable to play this stream right now.";
       watchStatus.hidden = false;
+      return;
     }
+    watchStatus.textContent = "This video format is not supported.";
+    watchStatus.hidden = false;
   });
   watchVideo.addEventListener("stalled", () => {
     if (watchStatus) {

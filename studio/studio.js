@@ -6,6 +6,15 @@ const studioStatus = document.getElementById("studio-status");
 const studioNavLinks = Array.from(document.querySelectorAll("[data-studio-nav]"));
 const studioPages = Array.from(document.querySelectorAll("[data-studio-page]"));
 
+const studioContentTabVideos = document.getElementById("studio-content-tab-videos");
+const studioContentTabShorts = document.getElementById("studio-content-tab-shorts");
+const studioContentVideos = document.getElementById("studio-content-videos");
+const studioContentShorts = document.getElementById("studio-content-shorts");
+const studioContentVideosList = document.getElementById("studio-content-videos-list");
+const studioContentShortsList = document.getElementById("studio-content-shorts-list");
+const studioContentVideosEmpty = document.getElementById("studio-content-videos-empty");
+const studioContentShortsEmpty = document.getElementById("studio-content-shorts-empty");
+
 const studioTitle = document.getElementById("studio-title");
 const studioUrl = document.getElementById("studio-url");
 const studioMime = document.getElementById("studio-mime");
@@ -77,6 +86,9 @@ let studioLoadedPublishedAt = "";
 let studioUploadTags = [];
 let studioUploadCustomCw = [];
 
+let studioContentLoadedForPubkey = "";
+let studioContentTab = "videos";
+
 if (authForm) {
   authForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -129,6 +141,149 @@ async function fetchAddressableVideoEvent(addr) {
 function getTagValue(tags, key) {
   const tag = (tags || []).find((entry) => entry && entry[0] === key);
   return tag ? String(tag[1] || "") : "";
+}
+
+function getTagValues(tags, key) {
+  return (tags || [])
+    .filter((t) => t && t[0] === key && String(t[1] || "").trim())
+    .map((t) => String(t[1] || "").trim());
+}
+
+function parseStudioVideoEvent(event) {
+  const tags = event?.tags || [];
+  const title = getTagValue(tags, "title") || "Untitled";
+  const thumb = getTagValue(tags, "thumb") || getTagValue(tags, "image") || "";
+  const publishedAt = Number(getTagValue(tags, "published_at") || event?.created_at || 0);
+  const urlTag = coerceUrlTag(tags);
+  const d = getTagValue(tags, "d");
+  const isAddressable = (event?.kind === 34235 || event?.kind === 34236) && Boolean(d);
+  const id = isAddressable ? `${event.kind}:${event.pubkey}:${d}` : String(event?.id || "");
+  return {
+    id,
+    title,
+    thumb,
+    publishedAt,
+    kind: Number(event?.kind || 0),
+    url: urlTag.url || "",
+  };
+}
+
+function formatStudioTime(ts) {
+  const sec = Number(ts || 0);
+  if (!sec) return "";
+  try {
+    const d = new Date(sec * 1000);
+    return d.toLocaleString();
+  } catch {
+    return "";
+  }
+}
+
+function setStudioContentTab(next) {
+  studioContentTab = next === "shorts" ? "shorts" : "videos";
+  if (studioContentTabVideos) studioContentTabVideos.classList.toggle("is-active", studioContentTab === "videos");
+  if (studioContentTabShorts) studioContentTabShorts.classList.toggle("is-active", studioContentTab === "shorts");
+  if (studioContentVideos) studioContentVideos.hidden = studioContentTab !== "videos";
+  if (studioContentShorts) studioContentShorts.hidden = studioContentTab !== "shorts";
+}
+
+function renderStudioContentList(container, emptyEl, items) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!items.length) {
+    if (emptyEl) {
+      emptyEl.textContent = "No uploads yet.";
+      emptyEl.hidden = false;
+    }
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+  items.forEach((item) => {
+    const link = document.createElement("a");
+    link.className = "studio-item";
+    link.href = `../#watch/${encodeURIComponent(item.id)}`;
+
+    const thumb = document.createElement("div");
+    thumb.className = "studio-item-thumb";
+    if (item.thumb) thumb.style.backgroundImage = `url(${item.thumb})`;
+
+    const body = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "studio-item-title";
+    title.textContent = item.title;
+    const meta = document.createElement("div");
+    meta.className = "studio-item-meta";
+    meta.textContent = formatStudioTime(item.publishedAt);
+    body.appendChild(title);
+    body.appendChild(meta);
+
+    link.appendChild(thumb);
+    link.appendChild(body);
+    container.appendChild(link);
+  });
+}
+
+async function fetchMyStudioUploads(pubkey) {
+  const clean = String(pubkey || "").trim();
+  if (!clean) return { videos: [], shorts: [] };
+  const found = [];
+  const filter = {
+    authors: [clean],
+    kinds: [21, 22, 34235, 34236],
+    limit: 200,
+  };
+  await Promise.all(
+    RELAYS.map((relay) =>
+      requestEvents(relay, filter, (event) => {
+        if (event?.id) found.push(event);
+      })
+    )
+  );
+
+  const latestById = new Map();
+  found.forEach((evt) => {
+    const parsed = parseStudioVideoEvent(evt);
+    if (!parsed.id) return;
+    const prev = latestById.get(parsed.id);
+    if (!prev || Number(parsed.publishedAt || 0) > Number(prev.publishedAt || 0)) {
+      latestById.set(parsed.id, parsed);
+    }
+  });
+
+  const items = Array.from(latestById.values());
+  const videos = items.filter((it) => it.kind === 21 || it.kind === 34235);
+  const shorts = items.filter((it) => it.kind === 22 || it.kind === 34236);
+  videos.sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
+  shorts.sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
+  return { videos, shorts };
+}
+
+async function ensureStudioContentLoaded() {
+  if (!authState.pubkey) return;
+  if (studioContentLoadedForPubkey === authState.pubkey) return;
+  studioContentLoadedForPubkey = authState.pubkey;
+  try {
+    if (studioContentVideosEmpty) {
+      studioContentVideosEmpty.textContent = "Loading videos…";
+      studioContentVideosEmpty.hidden = false;
+    }
+    if (studioContentShortsEmpty) {
+      studioContentShortsEmpty.textContent = "Loading shorts…";
+      studioContentShortsEmpty.hidden = false;
+    }
+    const { videos, shorts } = await fetchMyStudioUploads(authState.pubkey);
+    renderStudioContentList(studioContentVideosList, studioContentVideosEmpty, videos);
+    renderStudioContentList(studioContentShortsList, studioContentShortsEmpty, shorts);
+  } catch {
+    if (studioContentVideosEmpty) {
+      studioContentVideosEmpty.textContent = "Unable to load videos.";
+      studioContentVideosEmpty.hidden = false;
+    }
+    if (studioContentShortsEmpty) {
+      studioContentShortsEmpty.textContent = "Unable to load shorts.";
+      studioContentShortsEmpty.hidden = false;
+    }
+  }
 }
 
 function coerceUrlTag(tags) {
@@ -806,6 +961,14 @@ function getStudioRoute() {
 function handleStudioRoute() {
   const route = getStudioRoute();
   setActiveStudioPage(route);
+  if (route === "content") {
+    if (!authState.pubkey) {
+      openModal(authModal);
+      setActiveStudioPage("dashboard");
+      return;
+    }
+    ensureStudioContentLoaded();
+  }
   if (route === "customization") {
     if (!authState.pubkey) {
       openModal(authModal);
@@ -1012,6 +1175,20 @@ if (authSignoutBtn) {
     showToast("Signed out");
   });
 }
+
+if (studioContentTabVideos) {
+  studioContentTabVideos.addEventListener("click", () => {
+    setStudioContentTab("videos");
+  });
+}
+
+if (studioContentTabShorts) {
+  studioContentTabShorts.addEventListener("click", () => {
+    setStudioContentTab("shorts");
+  });
+}
+
+setStudioContentTab("videos");
 
 if (studioPublish) {
   studioPublish.addEventListener("click", async () => {

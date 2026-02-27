@@ -468,11 +468,15 @@
                   </div>
                   <div class="watch-comments">
                     <div class="watch-comments-title">Comment</div>
-                    <textarea class="watch-comment-input" id="watch-comment-input" rows="3" placeholder="Write a comment…"></textarea>
+                    <textarea class="watch-comment-input" id="watch-comment-input" rows="1" placeholder="Write a comment…"></textarea>
                     <div class="watch-comment-actions">
                       <button class="watch-comment-btn" id="watch-comment-send">Post</button>
                     </div>
-                    <div class="watch-comments-note" id="watch-comments-note">Sign in to post comments.</div>
+                    <div class="watch-comments-note" id="watch-comments-note" hidden>
+                      Sign in to comment.
+                    </div>
+                    <div class="watch-comments-list" id="watch-comments-list"></div>
+                    <div class="watch-comments-empty" id="watch-comments-empty">No comments yet.</div>
                   </div>
                 </div>
               </section>
@@ -502,10 +506,62 @@
               <button class="channel-action" id="channel-edit" hidden>Edit channel</button>
             </div>
           </div>
+
+          <div class="channel-tabs" id="channel-tabs">
+            <button class="channel-tab is-active" type="button" id="channel-tab-videos">Videos</button>
+            <button class="channel-tab" type="button" id="channel-tab-shorts">Shorts</button>
+            <button class="channel-tab" type="button" id="channel-tab-live">Live</button>
+            <button class="channel-tab" type="button" id="channel-tab-about">About</button>
+          </div>
+
           <section class="feed-section">
-            <h2 class="feed-title">Videos</h2>
-            <div class="feed" id="feed-channel"></div>
-            <div class="feed-empty" id="feed-channel-empty">Loading channel videos…</div>
+            <div class="channel-panel" id="channel-panel-videos">
+              <h2 class="feed-title">Videos</h2>
+              <div class="feed" id="feed-channel"></div>
+              <div class="feed-empty" id="feed-channel-empty">Loading channel videos…</div>
+            </div>
+
+            <div class="channel-panel" id="channel-panel-shorts" hidden>
+              <h2 class="feed-title">Shorts</h2>
+              <div class="shorts-grid" id="channel-shorts-grid"></div>
+              <div class="feed-empty" id="channel-shorts-empty">Loading shorts…</div>
+            </div>
+
+            <div class="channel-panel" id="channel-panel-live" hidden>
+              <h2 class="feed-title">Live</h2>
+              <div class="feed" id="feed-channel-live"></div>
+              <div class="feed-empty" id="channel-live-empty">Loading live streams…</div>
+            </div>
+
+            <div class="channel-panel" id="channel-panel-about" hidden>
+              <h2 class="feed-title">About</h2>
+              <div class="watch-actions" style="margin: 8px 0 12px; gap: 8px; justify-content: flex-start;">
+                <button class="watch-action" id="channel-event" type="button">
+                  <span class="material-symbols-rounded">code</span>
+                  Profile
+                </button>
+              </div>
+              <div class="channel-about" id="channel-about"></div>
+              <div class="feed-empty" id="channel-about-empty">No about info yet.</div>
+              <div class="watch-event-panel" id="channel-event-panel" hidden>
+                <div class="watch-event-panel-head">
+                  <div class="watch-event-panel-title">Profile</div>
+                  <button class="icon-btn" id="channel-event-close" type="button" aria-label="Close">
+                    <span class="material-symbols-rounded">close</span>
+                  </button>
+                </div>
+                <div class="watch-event-panel-body">
+                  <div class="watch-event-section">
+                    <div class="watch-event-section-title">Relays</div>
+                    <div class="watch-event-relays" id="channel-event-relays"></div>
+                  </div>
+                  <div class="watch-event-section">
+                    <div class="watch-event-section-title">Raw event</div>
+                    <pre class="watch-event-raw" id="channel-event-raw"></pre>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
         </section>
       </main>
